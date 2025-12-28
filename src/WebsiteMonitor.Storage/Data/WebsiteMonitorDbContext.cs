@@ -1,9 +1,14 @@
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using WebsiteMonitor.Storage.Identity;
 using WebsiteMonitor.Storage.Models;
 
 namespace WebsiteMonitor.Storage.Data;
 
-public sealed class WebsiteMonitorDbContext : DbContext
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using WebsiteMonitor.Storage.Identity;
+
+public sealed class WebsiteMonitorDbContext : IdentityDbContext<ApplicationUser>
 {
     public WebsiteMonitorDbContext(DbContextOptions<WebsiteMonitorDbContext> options) : base(options) { }
 

@@ -1,15 +1,20 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using WebsiteMonitor.App.Infrastructure;
 using WebsiteMonitor.Storage.Data;
+using WebsiteMonitor.Storage.Identity;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// DataRoot is configured in appsettings.Development.json for local dev.
-// We require it in Step 2 so we don't write to unknown locations.
+// --------------------
+// Required config (local dev)
+// --------------------
 var dataRoot = builder.Configuration.GetValue<string>("WebsiteMonitor:DataRoot");
 if (string.IsNullOrWhiteSpace(dataRoot))
 {
-    throw new InvalidOperationException("WebsiteMonitor:DataRoot is not set. Set it in appsettings.Development.json.");
+    throw new InvalidOperationException(
+        "WebsiteMonitor:DataRoot is not set. Set it in src/WebsiteMonitor.App/appsettings.Development.json.");
 }
 
 var paths = new ProductPaths(dataRoot);
@@ -17,6 +22,10 @@ var paths = new ProductPaths(dataRoot);
 // Ensure directories exist
 Directory.CreateDirectory(Path.GetDirectoryName(paths.DbPath)!);
 Directory.CreateDirectory(paths.DataProtectionKeysDir);
+
+// --------------------
+// Services
+// --------------------
 
 // EF Core SQLite
 builder.Services.AddDbContext<WebsiteMonitorDbContext>(options =>
@@ -27,24 +36,53 @@ builder.Services.AddDbContext<WebsiteMonitorDbContext>(options =>
 // Health checks
 builder.Services.AddHealthChecks();
 
+// Identity (local accounts + roles)
+builder.Services
+    .AddIdentity<ApplicationUser, IdentityRole>(options =>
+    {
+        options.SignIn.RequireConfirmedAccount = false;
+        options.Password.RequireNonAlphanumeric = false;
+    })
+    .AddEntityFrameworkStores<WebsiteMonitorDbContext>()
+    .AddDefaultTokenProviders();
 
-// Add services to the container.
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+// Authorization services (needed for [Authorize])
+builder.Services.AddAuthorization();
+
+// Razor Pages (we will use this for /bootstrap and /setup pages)
+builder.Services.AddRazorPages();
+
+// Swagger/OpenAPI (keep template stuff for now)
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// --------------------
+// Build
+// --------------------
 var app = builder.Build();
-// Apply migrations on startup (dev convenience for now)
-using (var scope = app.Services.CreateScope())
+
+// --------------------
+// Database migrate + create roles on startup
+// --------------------
+await using (var scope = app.Services.CreateAsyncScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<WebsiteMonitorDbContext>();
-    db.Database.Migrate();
+    await db.Database.MigrateAsync();
+
+    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+    var roles = new[] { "Admin", "Viewer" };
+    foreach (var role in roles)
+    {
+        if (!await roleManager.RoleExistsAsync(role))
+        {
+            await roleManager.CreateAsync(new IdentityRole(role));
+        }
+    }
 }
 
-app.MapHealthChecks("/healthz");
-
-
-// Configure the HTTP request pipeline.
+// --------------------
+// Middleware / endpoints
+// --------------------
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -53,16 +91,23 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+app.UseRouting();
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapRazorPages();
+app.MapHealthChecks("/healthz");
+
+// Keep the template endpoint if you want; harmless for now.
 var summaries = new[]
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
+    "Freezing","Bracing","Chilly","Cool","Mild","Warm","Balmy","Hot","Sweltering","Scorching"
 };
 
 app.MapGet("/weatherforecast", () =>
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
+    var forecast = Enumerable.Range(1, 5).Select(index =>
+        new WeatherForecast(
             DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
             Random.Shared.Next(-20, 55),
             summaries[Random.Shared.Next(summaries.Length)]

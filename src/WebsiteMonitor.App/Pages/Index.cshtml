@@ -1,0 +1,23 @@
+@page
+@using Microsoft.AspNetCore.Identity
+@using WebsiteMonitor.Storage.Identity
+@inject SignInManager<ApplicationUser> SignInManager
+
+<h1>ITWebsiteMonitor</h1>
+
+@if (SignInManager.IsSignedIn(User))
+{
+    <p>Signed in as: <b>@User.Identity?.Name</b></p>
+    <ul>
+        <li><a href="/setup">Setup</a></li>
+        <li><a href="/account/logout">Logout</a></li>
+    </ul>
+}
+else
+{
+    <p>Not signed in.</p>
+    <ul>
+        <li><a href="/bootstrap">Bootstrap (first admin)</a></li>
+        <li><a href="/account/login">Login</a></li>
+    </ul>
+}

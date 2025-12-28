@@ -1,0 +1,29 @@
+@page
+@model WebsiteMonitor.App.Pages.Account.LoginModel
+
+<h1>Login</h1>
+
+@if (Model.Error != null)
+{
+    <p style="color:red">@Model.Error</p>
+}
+
+<form method="post">
+    @Html.AntiForgeryToken()
+
+    <label>Email</label><br />
+    <input asp-for="Email" type="email" /><br /><br />
+
+    <label>Password</label><br />
+    <input asp-for="Password" type="password" /><br /><br />
+
+    <label>
+        <input asp-for="RememberMe" type="checkbox" />
+        Remember me
+    </label>
+    <br /><br />
+
+    <button type="submit">Login</button>
+</form>
+
+<p><a href="/">Home</a></p>

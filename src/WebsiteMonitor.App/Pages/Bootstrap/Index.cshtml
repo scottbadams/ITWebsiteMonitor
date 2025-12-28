@@ -1,0 +1,23 @@
+@page
+@model WebsiteMonitor.App.Pages.Bootstrap.IndexModel
+@{
+    ViewData["Title"] = "Create Admin";
+}
+
+<h1>Create Admin</h1>
+
+@if (Model.Error != null)
+{
+    <p style="color:red">@Model.Error</p>
+}
+
+<form method="post">
+    @Html.AntiForgeryToken()
+    <label>Email</label><br />
+    <input name="Email" type="email" required /><br /><br />
+
+    <label>Password</label><br />
+    <input name="Password" type="password" required /><br /><br />
+
+    <button type="submit">Create Admin</button>
+</form>

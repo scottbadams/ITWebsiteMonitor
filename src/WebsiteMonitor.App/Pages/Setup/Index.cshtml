@@ -1,0 +1,9 @@
+@page
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Roles = "Admin")]
+
+<h1>Setup</h1>
+<p>If you can see this page, Admin auth is working.</p>
+
+<p><a href="/">Home</a></p>
+<p><a href="/account/logout">Logout</a></p>
