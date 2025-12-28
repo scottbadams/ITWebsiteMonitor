@@ -54,7 +54,16 @@ builder.Services.AddAuthorization();
 // Razor Pages (we will use this for /bootstrap and /setup pages)
 builder.Services.AddRazorPages();
 builder.Services.AddControllers();
+builder.Services.AddSingleton<WebsiteMonitor.Monitoring.Checks.TargetCheckService>();
 
+builder.Services.AddHttpClient("monitor")
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        // Reasonable defaults; can tune later
+        PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+        MaxConnectionsPerServer = 50
+    });
 
 // Swagger/OpenAPI (keep template stuff for now)
 builder.Services.AddEndpointsApiExplorer();

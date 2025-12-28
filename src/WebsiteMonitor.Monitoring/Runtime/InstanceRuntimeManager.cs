@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
+using WebsiteMonitor.Monitoring.Checks;
 
 namespace WebsiteMonitor.Monitoring.Runtime;
 
@@ -21,10 +22,12 @@ public sealed class InstanceRuntimeManager : IInstanceRuntimeManager
 
     private readonly ConcurrentDictionary<string, Worker> _workers = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILogger<InstanceRuntimeManager> _logger;
+    private readonly TargetCheckService _checks;
 
-    public InstanceRuntimeManager(ILogger<InstanceRuntimeManager> logger)
+    public InstanceRuntimeManager(ILogger<InstanceRuntimeManager> logger, TargetCheckService checks)
     {
         _logger = logger;
+        _checks = checks;
     }
 
     public IReadOnlyCollection<InstanceRuntimeStatus> GetAll()
@@ -65,11 +68,11 @@ public sealed class InstanceRuntimeManager : IInstanceRuntimeManager
 
             try
             {
-                // Placeholder loop (real monitoring comes later)
-                using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
-                while (await timer.WaitForNextTickAsync(w.Cts.Token))
+                while (!w.Cts!.IsCancellationRequested)
                 {
-                    _logger.LogInformation("Instance {InstanceId} tick.", instanceId);
+                    // Run checks once; returns the interval seconds to wait
+                    var seconds = await _checks.RunInstanceOnceAsync(instanceId, w.Cts.Token);
+                    await Task.Delay(TimeSpan.FromSeconds(seconds), w.Cts.Token);
                 }
             }
             catch (OperationCanceledException)

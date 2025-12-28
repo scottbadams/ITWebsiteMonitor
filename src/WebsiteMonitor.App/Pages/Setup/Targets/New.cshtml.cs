@@ -18,7 +18,7 @@ public sealed class NewModel : PageModel
     [BindProperty(SupportsGet = true)]
     public string InstanceId { get; set; } = "";
 
-    [BindProperty] public string Url { get; set; } = "";
+    [BindProperty] public string TargetUrl { get; set; } = "";
     [BindProperty] public bool Enabled { get; set; } = true;
     [BindProperty] public int HttpMin { get; set; } = 200;
     [BindProperty] public int HttpMax { get; set; } = 399;
@@ -37,15 +37,15 @@ public sealed class NewModel : PageModel
         var exists = await _db.Instances.AnyAsync(i => i.InstanceId == InstanceId);
         if (!exists) return NotFound();
 
-        Url = (Url ?? "").Trim();
-        if (string.IsNullOrWhiteSpace(Url))
+        TargetUrl = (TargetUrl ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(TargetUrl))
         {
             Error = "URL is required.";
             return Page();
         }
 
         // Minimal sanity check (real URL validation later)
-        if (!Uri.TryCreate(Url, UriKind.Absolute, out var uri) || (uri.Scheme != "http" && uri.Scheme != "https"))
+        if (!Uri.TryCreate(TargetUrl, UriKind.Absolute, out var uri) || (uri.Scheme != "http" && uri.Scheme != "https"))
         {
             Error = "URL must be an absolute http/https URL.";
             return Page();
@@ -54,7 +54,7 @@ public sealed class NewModel : PageModel
         var target = new Target
         {
             InstanceId = InstanceId,
-            Url = Url,
+            Url = TargetUrl,
             Enabled = Enabled,
             HttpExpectedStatusMin = HttpMin,
             HttpExpectedStatusMax = HttpMax,

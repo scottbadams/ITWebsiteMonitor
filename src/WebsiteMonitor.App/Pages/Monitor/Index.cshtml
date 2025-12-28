@@ -3,6 +3,34 @@
 
 <h1>Monitor: @Model.InstanceId</h1>
 
-<p>This is a placeholder page. Real status/results come in a later step.</p>
-
 <p><a href="/setup/instances/@Model.InstanceId">Configure</a> | <a href="/setup">Setup</a> | <a href="/">Home</a></p>
+
+<table border="1" cellpadding="6" cellspacing="0">
+  <thead>
+    <tr>
+      <th>TargetId</th>
+      <th>Enabled</th>
+      <th>URL</th>
+      <th>Status</th>
+      <th>Last Check (UTC)</th>
+      <th>State Since (UTC)</th>
+      <th>Consecutive Failures</th>
+      <th>Last Summary</th>
+    </tr>
+  </thead>
+  <tbody>
+@foreach (var r in Model.Rows)
+{
+    <tr>
+      <td>@r.TargetId</td>
+      <td>@r.Enabled</td>
+      <td>@r.Url</td>
+      <td>@r.Status</td>
+      <td>@r.LastCheckUtc</td>
+      <td>@r.StateSinceUtc</td>
+      <td>@r.ConsecutiveFailures</td>
+      <td>@r.LastSummary</td>
+    </tr>
+}
+  </tbody>
+</table>
