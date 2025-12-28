@@ -13,6 +13,9 @@ public sealed class WebsiteMonitorDbContext : IdentityDbContext<ApplicationUser>
     public WebsiteMonitorDbContext(DbContextOptions<WebsiteMonitorDbContext> options) : base(options) { }
 
     public DbSet<Instance> Instances => Set<Instance>();
+    public DbSet<WebsiteMonitor.Storage.Models.Target> Targets => Set<WebsiteMonitor.Storage.Models.Target>();
+    public DbSet<WebsiteMonitor.Storage.Models.Check> Checks => Set<WebsiteMonitor.Storage.Models.Check>();
+    public DbSet<WebsiteMonitor.Storage.Models.TargetState> States => Set<WebsiteMonitor.Storage.Models.TargetState>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -26,6 +29,31 @@ public sealed class WebsiteMonitorDbContext : IdentityDbContext<ApplicationUser>
             b.Property(x => x.DisplayName).HasMaxLength(200).IsRequired();
             b.Property(x => x.TimeZoneId).HasMaxLength(64).IsRequired();
             b.Property(x => x.CreatedUtc).IsRequired();
+        });
+
+        modelBuilder.Entity<WebsiteMonitor.Storage.Models.Target>(b =>
+        {
+            b.ToTable("Targets");
+            b.HasKey(x => x.TargetId);
+            b.Property(x => x.InstanceId).HasMaxLength(64).IsRequired();
+            b.Property(x => x.Url).HasMaxLength(2048).IsRequired();
+            b.Property(x => x.LoginRule).HasMaxLength(200);
+            b.HasIndex(x => new { x.InstanceId, x.Url }).IsUnique(false);
+        });
+
+        modelBuilder.Entity<WebsiteMonitor.Storage.Models.Check>(b =>
+        {
+            b.ToTable("Checks");
+            b.HasKey(x => x.CheckId);
+            b.Property(x => x.Summary).HasMaxLength(4000);
+            b.HasIndex(x => new { x.TargetId, x.TimestampUtc });
+        });
+
+        modelBuilder.Entity<WebsiteMonitor.Storage.Models.TargetState>(b =>
+        {
+            b.ToTable("State");
+            b.HasKey(x => x.TargetId);
+            b.Property(x => x.LastSummary).HasMaxLength(4000);
         });
     }
 }

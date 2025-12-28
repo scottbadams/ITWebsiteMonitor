@@ -1,0 +1,49 @@
+@page "/setup/instances/{instanceId}/targets"
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Roles = "Admin")]
+@model WebsiteMonitor.App.Pages.Setup.Targets.IndexModel
+
+<h1>Targets for @Model.InstanceId</h1>
+
+<p>
+  <a href="/setup/instances/@Model.InstanceId">Back to Instance</a>
+  | <a href="/setup/instances/@Model.InstanceId/targets/new">Add Target</a>
+</p>
+
+<table border="1" cellpadding="6" cellspacing="0">
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Enabled</th>
+      <th>URL</th>
+      <th>LoginRule</th>
+      <th>Expected HTTP</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+@foreach (var t in Model.Rows)
+{
+    <tr>
+      <td>@t.TargetId</td>
+      <td>@t.Enabled</td>
+      <td>@t.Url</td>
+      <td>@(t.LoginRule ?? "")</td>
+      <td>@t.HttpMin - @t.HttpMax</td>
+      <td>
+        <form method="post" asp-page-handler="Toggle" style="display:inline;">
+          @Html.AntiForgeryToken()
+          <input type="hidden" name="targetId" value="@t.TargetId" />
+          <button type="submit">Toggle</button>
+        </form>
+
+        <form method="post" asp-page-handler="Delete" style="display:inline;" onsubmit="return confirm('Delete this target?');">
+          @Html.AntiForgeryToken()
+          <input type="hidden" name="targetId" value="@t.TargetId" />
+          <button type="submit">Delete</button>
+        </form>
+      </td>
+    </tr>
+}
+  </tbody>
+</table>

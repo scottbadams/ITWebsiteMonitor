@@ -1,0 +1,32 @@
+@page "/setup/instances/{instanceId}/targets/new"
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Roles = "Admin")]
+@model WebsiteMonitor.App.Pages.Setup.Targets.NewModel
+
+<h1>Add Target (Instance: @Model.InstanceId)</h1>
+
+@if (Model.Error != null)
+{
+    <p style="color:red">@Model.Error</p>
+}
+
+<form method="post">
+    @Html.AntiForgeryToken()
+
+    <label>URL</label><br />
+    <input asp-for="Url" style="width:600px" /><br /><br />
+
+    <label>Enabled</label>
+    <input asp-for="Enabled" type="checkbox" />
+    <br /><br />
+
+    <label>Expected HTTP Status Min</label><br />
+    <input asp-for="HttpMin" type="number" /><br /><br />
+
+    <label>Expected HTTP Status Max</label><br />
+    <input asp-for="HttpMax" type="number" /><br /><br />
+
+    <button type="submit">Add</button>
+</form>
+
+<p><a href="/setup/instances/@Model.InstanceId/targets">Back</a></p>
