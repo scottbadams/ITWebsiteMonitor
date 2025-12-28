@@ -490,3 +490,6 @@ $RECYCLE.BIN/
 # But keep build artifacts ignored
 src/WebsiteMonitor.App/bin/
 src/WebsiteMonitor.App/obj/
+
+# WebsiteMonitor local runtime data (never commit)
+.localdata/
