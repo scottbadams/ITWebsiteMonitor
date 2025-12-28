@@ -482,3 +482,11 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# WebsiteMonitor: allow the .NET App project folder (overrides *.app)
+!src/WebsiteMonitor.App/
+!src/WebsiteMonitor.App/**
+
+# But keep build artifacts ignored
+src/WebsiteMonitor.App/bin/
+src/WebsiteMonitor.App/obj/
