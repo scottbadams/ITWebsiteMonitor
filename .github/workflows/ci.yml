@@ -8,12 +8,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: List files (diagnostic)
+        run: |
+          pwd
+          ls -la
+          echo "---- csproj files ----"
+          find . -maxdepth 4 -type f -name "*.csproj" -print
+          echo "---- solution file ----"
+          ls -la WebsiteMonitor.sln
+          echo "---- solution references ----"
+          grep -n ".csproj" WebsiteMonitor.sln || true
+
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+
       - name: Restore
-        run: dotnet restore
+        run: dotnet restore ./WebsiteMonitor.sln
+
       - name: Build
-        run: dotnet build --no-restore
+        run: dotnet build ./WebsiteMonitor.sln --no-restore
+
       - name: Test
-        run: dotnet test --no-build
+        run: dotnet test ./WebsiteMonitor.sln --no-build
