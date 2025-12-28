@@ -1,9 +1,56 @@
-@page
+@page "/setup"
 @using Microsoft.AspNetCore.Authorization
 @attribute [Authorize(Roles = "Admin")]
+@model WebsiteMonitor.App.Pages.Setup.IndexModel
 
 <h1>Setup</h1>
-<p>If you can see this page, Admin auth is working.</p>
 
-<p><a href="/">Home</a></p>
-<p><a href="/account/logout">Logout</a></p>
+<p><a href="/setup/first-run">Create new instance</a></p>
+
+<table border="1" cellpadding="6" cellspacing="0">
+    <thead>
+        <tr>
+            <th>InstanceId</th>
+            <th>Name</th>
+            <th>Enabled</th>
+            <th>Runtime</th>
+            <th>Actions</th>
+            <th>Links</th>
+        </tr>
+    </thead>
+    <tbody>
+@foreach (var i in Model.Rows)
+{
+        <tr>
+            <td>@i.InstanceId</td>
+            <td>@i.DisplayName</td>
+            <td>@i.Enabled</td>
+            <td>@i.RuntimeState (@i.RuntimeChangedUtc.ToString("u"))</td>
+            <td>
+                <form method="post" asp-page-handler="Start" style="display:inline;">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="instanceId" value="@i.InstanceId" />
+                    <button type="submit">Start</button>
+                </form>
+
+                <form method="post" asp-page-handler="Stop" style="display:inline;">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="instanceId" value="@i.InstanceId" />
+                    <button type="submit">Stop</button>
+                </form>
+
+                <form method="post" asp-page-handler="Restart" style="display:inline;">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="instanceId" value="@i.InstanceId" />
+                    <button type="submit">Restart</button>
+                </form>
+            </td>
+            <td>
+                <a href="/setup/instances/@i.InstanceId">Configure</a>
+                |
+                <a href="/monitor/@i.InstanceId">Monitor</a>
+            </td>
+        </tr>
+}
+    </tbody>
+</table>

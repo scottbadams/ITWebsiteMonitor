@@ -4,6 +4,8 @@ using Microsoft.Extensions.DependencyInjection;
 using WebsiteMonitor.App.Infrastructure;
 using WebsiteMonitor.Storage.Data;
 using WebsiteMonitor.Storage.Identity;
+using WebsiteMonitor.Monitoring.HostedServices;
+using WebsiteMonitor.Monitoring.Runtime;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -51,10 +53,14 @@ builder.Services.AddAuthorization();
 
 // Razor Pages (we will use this for /bootstrap and /setup pages)
 builder.Services.AddRazorPages();
+builder.Services.AddControllers();
+
 
 // Swagger/OpenAPI (keep template stuff for now)
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddSingleton<IInstanceRuntimeManager, InstanceRuntimeManager>();
+builder.Services.AddHostedService<InstanceAutoStartHostedService>();
 
 // --------------------
 // Build
@@ -97,6 +103,7 @@ app.UseAuthorization();
 
 app.MapRazorPages();
 app.MapHealthChecks("/healthz");
+app.MapControllers();
 
 // Keep the template endpoint if you want; harmless for now.
 var summaries = new[]
@@ -117,6 +124,13 @@ app.MapGet("/weatherforecast", () =>
 })
 .WithName("GetWeatherForecast")
 .WithOpenApi();
+
+app.MapGet("/setup/setup-{instanceId}", (string instanceId) =>
+        Results.Redirect($"/setup/instances/{instanceId}"))
+   .RequireAuthorization(p => p.RequireRole("Admin"));
+
+app.MapGet("/monitor-{instanceId}", (string instanceId) =>
+        Results.Redirect($"/monitor/{instanceId}"));
 
 app.Run();
 

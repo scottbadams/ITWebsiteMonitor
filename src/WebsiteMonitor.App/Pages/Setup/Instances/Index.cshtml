@@ -1,0 +1,58 @@
+@page "/setup/instances/{instanceId}"
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Roles = "Admin")]
+@model WebsiteMonitor.App.Pages.Setup.Instances.IndexModel
+
+<h1>Instance: @Model.InstanceId</h1>
+
+@if (Model.Error != null)
+{
+    <p style="color:red">@Model.Error</p>
+}
+
+<form method="post" asp-page-handler="Save">
+    @Html.AntiForgeryToken()
+
+    <label>Display Name</label><br />
+    <input asp-for="DisplayName" /><br /><br />
+
+    <label>Enabled</label>
+    <input asp-for="Enabled" type="checkbox" />
+    <br /><br />
+
+    <label>TimeZoneId (IANA)</label><br />
+    <input asp-for="TimeZoneId" /><br /><br />
+
+    <label>Check Interval (seconds)</label><br />
+    <input asp-for="CheckIntervalSeconds" type="number" /><br /><br />
+
+    <label>Concurrency Limit</label><br />
+    <input asp-for="ConcurrencyLimit" type="number" /><br /><br />
+
+    <label>Write HTML Snapshot</label>
+    <input asp-for="WriteHtmlSnapshot" type="checkbox" />
+    <br /><br />
+
+    <label>Output Folder (optional)</label><br />
+    <input asp-for="OutputFolder" /><br /><br />
+
+    <button type="submit">Save</button>
+</form>
+
+<h2>Runtime</h2>
+<p>State: <b>@Model.RuntimeState</b> (since @Model.RuntimeChangedUtc.ToString("u"))</p>
+
+<form method="post" asp-page-handler="Start" style="display:inline;">
+    @Html.AntiForgeryToken()
+    <button type="submit">Start</button>
+</form>
+<form method="post" asp-page-handler="Stop" style="display:inline;">
+    @Html.AntiForgeryToken()
+    <button type="submit">Stop</button>
+</form>
+<form method="post" asp-page-handler="Restart" style="display:inline;">
+    @Html.AntiForgeryToken()
+    <button type="submit">Restart</button>
+</form>
+
+<p><a href="/setup">Back to Setup</a> | <a href="/monitor/@Model.InstanceId">Monitor</a></p>

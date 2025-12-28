@@ -1,0 +1,35 @@
+@page "/setup/first-run"
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Roles = "Admin")]
+@model WebsiteMonitor.App.Pages.Setup.FirstRunModel
+
+<h1>Create Instance</h1>
+
+@if (Model.Error != null)
+{
+    <p style="color:red">@Model.Error</p>
+}
+
+<form method="post">
+    @Html.AntiForgeryToken()
+
+    <label>InstanceId (slug: lowercase letters, numbers, hyphen)</label><br />
+    <input asp-for="InstanceId" /><br /><br />
+
+    <label>Display Name</label><br />
+    <input asp-for="DisplayName" /><br /><br />
+
+    <label>TimeZoneId (IANA string)</label><br />
+    <input asp-for="TimeZoneId" /><br /><br />
+
+    <label>Check Interval (seconds)</label><br />
+    <input asp-for="CheckIntervalSeconds" type="number" /><br /><br />
+
+    <label>Enabled</label>
+    <input asp-for="Enabled" type="checkbox" />
+    <br /><br />
+
+    <button type="submit">Create</button>
+</form>
+
+<p><a href="/setup">Back</a></p>
