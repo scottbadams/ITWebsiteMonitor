@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -6,6 +7,7 @@ using WebsiteMonitor.Storage.Data;
 using WebsiteMonitor.Storage.Identity;
 using WebsiteMonitor.Monitoring.HostedServices;
 using WebsiteMonitor.Monitoring.Runtime;
+using WebsiteMonitor.Monitoring.Alerting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -25,14 +27,27 @@ var paths = new ProductPaths(dataRoot);
 Directory.CreateDirectory(Path.GetDirectoryName(paths.DbPath)!);
 Directory.CreateDirectory(paths.DataProtectionKeysDir);
 
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(paths.DataProtectionKeysDir))
+    .SetApplicationName("ITWebsiteMonitor");
+
+builder.Services.AddSingleton<WebsiteMonitor.App.Infrastructure.SmtpPasswordProtector>();
+
 // --------------------
 // Services
 // --------------------
 
 // EF Core SQLite
-builder.Services.AddDbContext<WebsiteMonitorDbContext>(options =>
+builder.Services.AddSingleton<SqlitePragmaConnectionInterceptor>();
+
+builder.Services.AddScoped<WebsiteMonitor.Notifications.Smtp.ISmtpSender, WebsiteMonitor.Notifications.Smtp.MailKitSmtpSender>();
+
+builder.Services.AddSingleton<WebsiteMonitor.Notifications.ISmtpEmailSender, WebsiteMonitor.Notifications.MailKitSmtpEmailSender>();
+
+builder.Services.AddDbContext<WebsiteMonitorDbContext>((sp, options) =>
 {
     options.UseSqlite($"Data Source={paths.DbPath}");
+    options.AddInterceptors(sp.GetRequiredService<SqlitePragmaConnectionInterceptor>());
 });
 
 // Health checks
@@ -70,6 +85,10 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddSingleton<IInstanceRuntimeManager, InstanceRuntimeManager>();
 builder.Services.AddHostedService<InstanceAutoStartHostedService>();
+builder.Services.Configure<AlertingOptions>(builder.Configuration.GetSection("WebsiteMonitor:Alerting"));
+builder.Services.AddSingleton<TimeZoneResolver>();
+builder.Services.AddScoped<AlertEvaluator>();
+builder.Services.AddHostedService<AlertSchedulerHostedService>();
 
 // --------------------
 // Build

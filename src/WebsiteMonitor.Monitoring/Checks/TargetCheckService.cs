@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Sockets;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -27,11 +28,11 @@ public sealed class TargetCheckService
 
     public async Task<int> RunInstanceOnceAsync(string instanceId, CancellationToken ct)
     {
-        // Load instance + targets in ONE scope
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<WebsiteMonitorDbContext>();
+        // Read instance + targets in ONE scope
+        using var readScope = _scopeFactory.CreateScope();
+        var readDb = readScope.ServiceProvider.GetRequiredService<WebsiteMonitorDbContext>();
 
-        var instance = await db.Instances.SingleOrDefaultAsync(i => i.InstanceId == instanceId, ct);
+        var instance = await readDb.Instances.SingleOrDefaultAsync(i => i.InstanceId == instanceId, ct);
         if (instance == null)
         {
             _logger.LogWarning("Instance {InstanceId} not found; skipping run.", instanceId);
@@ -47,7 +48,7 @@ public sealed class TargetCheckService
         var intervalSeconds = Math.Max(5, instance.CheckIntervalSeconds);
         var limit = Math.Max(1, instance.ConcurrencyLimit);
 
-        var targets = await db.Targets
+        var targets = await readDb.Targets
             .Where(t => t.InstanceId == instanceId && t.Enabled)
             .OrderBy(t => t.TargetId)
             .ToListAsync(ct);
@@ -58,25 +59,28 @@ public sealed class TargetCheckService
             return intervalSeconds;
         }
 
+        // 1) Run checks concurrently (bounded)
         using var sem = new SemaphoreSlim(limit, limit);
 
-        var tasks = new List<Task>(targets.Count);
+        var tasks = new List<Task<TargetCheckResult?>>(targets.Count);
         foreach (var t in targets)
         {
-            await sem.WaitAsync(ct);
+            var target = t;
             tasks.Add(Task.Run(async () =>
             {
+                await sem.WaitAsync(ct);
                 try
                 {
-                    await CheckAndPersistOneAsync(t, ct);
+                    return await CheckOneAsync(target, ct);
                 }
                 catch (OperationCanceledException)
                 {
-                    // normal stop
+                    return null;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Target check failed unexpectedly for TargetId={TargetId}", t.TargetId);
+                    _logger.LogError(ex, "Target check failed unexpectedly for TargetId={TargetId}", target.TargetId);
+                    return null;
                 }
                 finally
                 {
@@ -85,11 +89,21 @@ public sealed class TargetCheckService
             }, ct));
         }
 
-        await Task.WhenAll(tasks);
+        var results = (await Task.WhenAll(tasks))
+            .Where(r => r != null)
+            .Cast<TargetCheckResult>()
+            .ToList();
+
+        if (results.Count == 0)
+            return intervalSeconds;
+
+        // 2) Persist serially and batched (one SaveChanges per tick)
+        await PersistBatchAsync(results, ct);
+
         return intervalSeconds;
     }
 
-    private async Task CheckAndPersistOneAsync(Target t, CancellationToken ct)
+    private async Task<TargetCheckResult> CheckOneAsync(Target t, CancellationToken ct)
     {
         var ts = DateTime.UtcNow;
 
@@ -104,8 +118,10 @@ public sealed class TargetCheckService
         var httpOk = http.ok;
         var summary = BuildSummary(tcpOk, tcp.latencyMs, httpOk, http.statusCode, http.latencyMs);
 
-        var result = new TargetCheckResult(
+        return new TargetCheckResult(
+            t.InstanceId,
             t.TargetId,
+            t.Url,
             ts,
             tcpOk,
             httpOk,
@@ -113,8 +129,6 @@ public sealed class TargetCheckService
             tcp.latencyMs,
             http.latencyMs,
             summary);
-
-        await PersistAsync(result, linked.Token);
     }
 
     private static string BuildSummary(bool tcpOk, int? tcpMs, bool httpOk, int? code, int? httpMs)
@@ -178,63 +192,111 @@ public sealed class TargetCheckService
         }
     }
 
-    private async Task PersistAsync(TargetCheckResult r, CancellationToken ct)
+    private async Task PersistBatchAsync(List<TargetCheckResult> results, CancellationToken ct)
     {
-        // IMPORTANT: each persist uses its own scope/dbcontext (thread-safe)
+        // Single scope + single DbContext for the entire batch (serial writes)
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<WebsiteMonitorDbContext>();
 
-        // Insert check history row
-        db.Checks.Add(new Check
+        try
         {
-            TargetId = r.TargetId,
-            TimestampUtc = r.TimestampUtc,
-            TcpOk = r.TcpOk,
-            HttpOk = r.HttpOk,
-            HttpStatusCode = r.HttpStatusCode,
-            TcpLatencyMs = r.TcpLatencyMs,
-            HttpLatencyMs = r.HttpLatencyMs,
-            Summary = r.Summary
-        });
+            // Preload all existing state rows in one query
+            var targetIds = results.Select(r => r.TargetId).Distinct().ToList();
+            var stateMap = await db.States
+                .Where(s => targetIds.Contains(s.TargetId))
+                .ToDictionaryAsync(s => s.TargetId, ct);
 
-        // Upsert state row
-        var state = await db.States.SingleOrDefaultAsync(s => s.TargetId == r.TargetId, ct);
-        var isUp = r.TcpOk && r.HttpOk;
-
-        if (state == null)
-        {
-            state = new TargetState
+            foreach (var r in results)
             {
-                TargetId = r.TargetId,
-                IsUp = isUp,
-                LastCheckUtc = r.TimestampUtc,
-                StateSinceUtc = r.TimestampUtc,
-                LastChangeUtc = r.TimestampUtc,
-                ConsecutiveFailures = isUp ? 0 : 1,
-                LastSummary = r.Summary
-            };
-            db.States.Add(state);
-        }
-        else
-        {
-            var changed = state.IsUp != isUp;
+                db.Checks.Add(new Check
+                {
+                    TargetId = r.TargetId,
+                    TimestampUtc = r.TimestampUtc,
+                    TcpOk = r.TcpOk,
+                    HttpOk = r.HttpOk,
+                    HttpStatusCode = r.HttpStatusCode,
+                    TcpLatencyMs = r.TcpLatencyMs,
+                    HttpLatencyMs = r.HttpLatencyMs,
+                    Summary = r.Summary
+                });
 
-            state.LastCheckUtc = r.TimestampUtc;
-            state.LastSummary = r.Summary;
+                var isUp = r.TcpOk && r.HttpOk;
 
-            if (changed)
-            {
-                state.IsUp = isUp;
-                state.LastChangeUtc = r.TimestampUtc;
-                state.StateSinceUtc = r.TimestampUtc;
-                state.ConsecutiveFailures = isUp ? 0 : 1;
+                if (!stateMap.TryGetValue(r.TargetId, out var state))
+                {
+                    state = new TargetState
+                    {
+                        TargetId = r.TargetId,
+                        IsUp = isUp,
+                        LastCheckUtc = r.TimestampUtc,
+                        StateSinceUtc = r.TimestampUtc,
+                        LastChangeUtc = r.TimestampUtc,
+                        ConsecutiveFailures = isUp ? 0 : 1,
+                        LastSummary = r.Summary
+                    };
+                    db.States.Add(state);
+                    stateMap[r.TargetId] = state;
+                }
+                else
+                {
+                    var changed = state.IsUp != isUp;
+
+                    state.LastCheckUtc = r.TimestampUtc;
+                    state.LastSummary = r.Summary;
+
+                    if (changed)
+                    {
+                        state.IsUp = isUp;
+                        state.LastChangeUtc = r.TimestampUtc;
+                        state.StateSinceUtc = r.TimestampUtc;
+                        state.ConsecutiveFailures = isUp ? 0 : 1;
+                    }
+                    else
+                    {
+                        state.ConsecutiveFailures = isUp ? 0 : (state.ConsecutiveFailures + 1);
+                    }
+                }
             }
-            else
-            {
-                state.ConsecutiveFailures = isUp ? 0 : (state.ConsecutiveFailures + 1);
-            }
-        }
 
-        await db.SaveChangesAsync(ct);
+            await SaveChangesWithSqliteRetryAsync(db, ct);
+        }
+        catch (SqliteException ex)
+        {
+            _logger.LogError(ex,
+                "SQLite failure PersistBatchAsync(Count={Count}) Err={Err} ExtErr={ExtErr} Message={Message}",
+                results.Count, ex.SqliteErrorCode, ex.SqliteExtendedErrorCode, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "PersistBatchAsync failed.");
+        }
+    }
+
+    private async Task SaveChangesWithSqliteRetryAsync(WebsiteMonitorDbContext db, CancellationToken ct)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            await SqliteWriteGate.Gate.WaitAsync(ct);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                return;
+            }
+            catch (SqliteException ex) when ((ex.SqliteErrorCode == 5 || ex.SqliteErrorCode == 6) && attempt <= 10)
+            {
+                // 5=SQLITE_BUSY, 6=SQLITE_LOCKED
+                _logger.LogWarning(ex,
+                    "SQLite busy/locked; attempt {Attempt}/10 Err={Err} ExtErr={ExtErr}.",
+                    attempt, ex.SqliteErrorCode, ex.SqliteExtendedErrorCode);
+            }
+            finally
+            {
+                SqliteWriteGate.Gate.Release();
+            }
+
+            // Backoff outside the gate
+            var delayMs = Math.Min(5000, 100 * attempt * attempt); // 100, 400, 900, ...
+            await Task.Delay(delayMs, ct);
+        }
     }
 }

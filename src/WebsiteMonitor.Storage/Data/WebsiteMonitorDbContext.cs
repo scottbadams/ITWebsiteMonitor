@@ -16,6 +16,9 @@ public sealed class WebsiteMonitorDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<WebsiteMonitor.Storage.Models.Target> Targets => Set<WebsiteMonitor.Storage.Models.Target>();
     public DbSet<WebsiteMonitor.Storage.Models.Check> Checks => Set<WebsiteMonitor.Storage.Models.Check>();
     public DbSet<WebsiteMonitor.Storage.Models.TargetState> States => Set<WebsiteMonitor.Storage.Models.TargetState>();
+    public DbSet<Event> Events => Set<Event>();
+	public DbSet<SmtpSettings> SmtpSettings => Set<SmtpSettings>();
+	public DbSet<Recipient> Recipients => Set<Recipient>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -30,6 +33,25 @@ public sealed class WebsiteMonitorDbContext : IdentityDbContext<ApplicationUser>
             b.Property(x => x.TimeZoneId).HasMaxLength(64).IsRequired();
             b.Property(x => x.CreatedUtc).IsRequired();
         });
+
+		modelBuilder.Entity<SmtpSettings>(b =>
+		{
+			b.HasKey(x => x.InstanceId);
+			b.Property(x => x.Host).HasMaxLength(255);
+			b.Property(x => x.Username).HasMaxLength(255);
+			b.Property(x => x.FromAddress).HasMaxLength(255);
+			b.Property(x => x.PasswordProtected);
+			b.Property(x => x.UpdatedUtc);
+		});
+
+		modelBuilder.Entity<Recipient>(b =>
+		{
+			b.HasKey(x => x.RecipientId);
+			b.Property(x => x.InstanceId).HasMaxLength(64);
+			b.Property(x => x.Email).HasMaxLength(255);
+			b.HasIndex(x => new { x.InstanceId, x.Email }).IsUnique();
+		});
+
 
         modelBuilder.Entity<WebsiteMonitor.Storage.Models.Target>(b =>
         {

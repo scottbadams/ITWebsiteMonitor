@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using WebsiteMonitor.Storage.Data;
 
@@ -10,9 +11,11 @@ using WebsiteMonitor.Storage.Data;
 namespace WebsiteMonitor.Storage.Migrations
 {
     [DbContext(typeof(WebsiteMonitorDbContext))]
-    partial class WebsiteMonitorDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251228235810_Step6_AlertingEvents")]
+    partial class Step6_AlertingEvents
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.22");
@@ -314,72 +317,6 @@ namespace WebsiteMonitor.Storage.Migrations
                     b.HasKey("InstanceId");
 
                     b.ToTable("Instances", (string)null);
-                });
-
-            modelBuilder.Entity("WebsiteMonitor.Storage.Models.Recipient", b =>
-                {
-                    b.Property<long>("RecipientId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("CreatedUtc")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("Enabled")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("InstanceId")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("RecipientId");
-
-                    b.HasIndex("InstanceId", "Email")
-                        .IsUnique();
-
-                    b.ToTable("Recipients");
-                });
-
-            modelBuilder.Entity("WebsiteMonitor.Storage.Models.SmtpSettings", b =>
-                {
-                    b.Property<string>("InstanceId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("FromAddress")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Host")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PasswordProtected")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("Port")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("SecurityMode")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("UpdatedUtc")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Username")
-                        .HasMaxLength(255)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("InstanceId");
-
-                    b.ToTable("SmtpSettings");
                 });
 
             modelBuilder.Entity("WebsiteMonitor.Storage.Models.Target", b =>

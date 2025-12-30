@@ -1,0 +1,29 @@
+@page "/setup/events"
+@model WebsiteMonitor.App.Pages.Setup.Events.IndexModel
+
+<h1>Events</h1>
+<p><a href="/setup">Back to Setup</a></p>
+
+<table border="1" cellpadding="6" cellspacing="0">
+  <thead>
+    <tr>
+      <th>UTC</th>
+      <th>Instance</th>
+      <th>TargetId</th>
+      <th>Type</th>
+      <th>Message</th>
+    </tr>
+  </thead>
+  <tbody>
+@foreach (var e in Model.Rows)
+{
+    <tr>
+      <td>@e.TimestampUtc</td>
+      <td>@e.InstanceId</td>
+      <td>@e.TargetId</td>
+      <td>@e.Type</td>
+      <td>@e.Message</td>
+    </tr>
+}
+  </tbody>
+</table>

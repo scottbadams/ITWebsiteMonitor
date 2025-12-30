@@ -1,0 +1,33 @@
+@page "/setup/instances/{instanceId}/smtptest"
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Roles = "Admin")]
+@model WebsiteMonitor.App.Pages.Setup.Instances.SmtpTestModel
+
+<h1>SMTP Test: @Model.InstanceId</h1>
+
+@if (!string.IsNullOrWhiteSpace(Model.Error))
+{
+    <p style="color:red; font-weight:600;">@Model.Error</p>
+}
+@if (!string.IsNullOrWhiteSpace(Model.Info))
+{
+    <p style="color:green; font-weight:600;">@Model.Info</p>
+}
+
+<form method="post" asp-page-handler="Send">
+    @Html.AntiForgeryToken()
+    <input type="hidden" asp-for="InstanceId" />
+
+    <label>From</label><br />
+    <input asp-for="FromAddress" readonly style="width:420px;" /><br /><br />
+
+    <label>To</label><br />
+    <input asp-for="ToAddress" style="width:420px;" /><br /><br />
+
+    <button type="submit">Send</button>
+    <button type="button" onclick="window.close();">Cancel</button>
+</form>
+
+<p>
+    <a href="/setup/instances/@Model.InstanceId">Back to Instance</a>
+</p>

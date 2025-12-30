@@ -493,3 +493,7 @@ src/WebsiteMonitor.App/obj/
 
 # WebsiteMonitor local runtime data (never commit)
 .localdata/
+
+runlog*.txt
+*.bak
+

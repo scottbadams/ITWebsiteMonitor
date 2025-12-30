@@ -5,13 +5,18 @@
 
 <h1>Instance: @Model.InstanceId</h1>
 
-@if (Model.Error != null)
+@if (!string.IsNullOrWhiteSpace(Model.Error))
 {
-    <p style="color:red">@Model.Error</p>
+    <p style="color:red; font-weight:600;">@Model.Error</p>
+}
+@if (!string.IsNullOrWhiteSpace(Model.Info))
+{
+    <p style="color:green; font-weight:600;">@Model.Info</p>
 }
 
 <form method="post" asp-page-handler="Save">
     @Html.AntiForgeryToken()
+    <input type="hidden" asp-for="InstanceId" />
 
     <label>Display Name</label><br />
     <input asp-for="DisplayName" /><br /><br />
@@ -39,19 +44,65 @@
     <button type="submit">Save</button>
 </form>
 
+<hr />
+
+<h2>SMTP Settings</h2>
+
+<form method="post">
+    @Html.AntiForgeryToken()
+    <input type="hidden" asp-for="InstanceId" />
+
+    <label>SMTP Host</label><br />
+    <input asp-for="SmtpHost" style="width:420px;" /><br /><br />
+
+    <label>SMTP Port</label><br />
+    <input asp-for="SmtpPort" type="number" style="width:120px;" /><br /><br />
+
+    <label>Security Mode</label><br />
+    <select asp-for="SmtpSecurityMode" style="width:220px;">
+        <option value="None">None</option>
+        <option value="SslTls">SSL/TLS</option>
+        <option value="StartTls">STARTTLS</option>
+    </select>
+    <br /><br />
+
+    <label>Username</label><br />
+    <input asp-for="SmtpUsername" style="width:420px;" /><br /><br />
+
+    <label>Password (leave blank to keep current)</label><br />
+    <input asp-for="SmtpPassword" type="password" style="width:420px;" /><br /><br />
+
+    <label>From Address</label><br />
+    <input asp-for="SmtpFromAddress" style="width:420px;" /><br /><br />
+
+    <label>Recipients (one email per line)</label><br />
+    <textarea asp-for="RecipientsText" rows="6" style="width:420px;"></textarea>
+    <br /><br />
+
+    <button type="submit" asp-page-handler="SaveSmtp">Save SMTP</button>
+
+    <!-- Saves settings, then opens the popup page in a new window/tab -->
+    <button type="submit" asp-page-handler="SaveAndTest" formtarget="_blank">Test SMTP</button>
+</form>
+
+<hr />
+
 <h2>Runtime</h2>
 <p>State: <b>@Model.RuntimeState</b> (since @Model.RuntimeChangedUtc.ToString("u"))</p>
 
 <form method="post" asp-page-handler="Start" style="display:inline;">
     @Html.AntiForgeryToken()
+    <input type="hidden" asp-for="InstanceId" />
     <button type="submit">Start</button>
 </form>
 <form method="post" asp-page-handler="Stop" style="display:inline;">
     @Html.AntiForgeryToken()
+    <input type="hidden" asp-for="InstanceId" />
     <button type="submit">Stop</button>
 </form>
 <form method="post" asp-page-handler="Restart" style="display:inline;">
     @Html.AntiForgeryToken()
+    <input type="hidden" asp-for="InstanceId" />
     <button type="submit">Restart</button>
 </form>
 

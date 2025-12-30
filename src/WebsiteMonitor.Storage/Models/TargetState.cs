@@ -11,4 +11,12 @@ public sealed class TargetState
 
     public int ConsecutiveFailures { get; set; }
     public string LastSummary { get; set; } = "";
+
+    // Alert tracking (UTC)
+    public DateTime? DownFirstNotifiedUtc { get; set; }
+    public DateTime? LastNotifiedUtc { get; set; }
+    public DateTime? NextNotifyUtc { get; set; }
+
+    public DateTime? RecoveredDueUtc { get; set; }
+    public DateTime? RecoveredNotifiedUtc { get; set; }
 }
