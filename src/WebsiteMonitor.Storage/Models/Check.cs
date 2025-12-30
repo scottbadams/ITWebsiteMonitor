@@ -14,5 +14,10 @@ public sealed class Check
     public int? TcpLatencyMs { get; set; }
     public int? HttpLatencyMs { get; set; }
 
+	public string? FinalUrl { get; set; }
+	public string? UsedIp { get; set; }
+	public string? DetectedLoginType { get; set; }
+	public bool LoginDetected { get; set; }
+
     public string Summary { get; set; } = "";
 }

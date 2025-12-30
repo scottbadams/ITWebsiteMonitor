@@ -33,6 +33,7 @@ public sealed class WebsiteMonitorDbContext : IdentityDbContext<ApplicationUser>
             b.Property(x => x.DisplayName).HasMaxLength(200).IsRequired();
             b.Property(x => x.TimeZoneId).HasMaxLength(64).IsRequired();
             b.Property(x => x.CreatedUtc).IsRequired();
+			b.Property(x => x.LastRunUtc);
         });
 
 		modelBuilder.Entity<SmtpSettings>(b =>
@@ -78,6 +79,9 @@ public sealed class WebsiteMonitorDbContext : IdentityDbContext<ApplicationUser>
             b.HasKey(x => x.CheckId);
             b.Property(x => x.Summary).HasMaxLength(4000);
             b.HasIndex(x => new { x.TargetId, x.TimestampUtc });
+			b.Property(x => x.FinalUrl).HasMaxLength(2048);
+			b.Property(x => x.UsedIp).HasMaxLength(64);
+			b.Property(x => x.DetectedLoginType).HasMaxLength(64);
         });
 
         modelBuilder.Entity<WebsiteMonitor.Storage.Models.TargetState>(b =>
@@ -85,6 +89,9 @@ public sealed class WebsiteMonitorDbContext : IdentityDbContext<ApplicationUser>
             b.ToTable("State");
             b.HasKey(x => x.TargetId);
             b.Property(x => x.LastSummary).HasMaxLength(4000);
+			b.Property(x => x.LastFinalUrl).HasMaxLength(2048);
+			b.Property(x => x.LastUsedIp).HasMaxLength(64);
+			b.Property(x => x.LastDetectedLoginType).HasMaxLength(64);
         });
     }
 }

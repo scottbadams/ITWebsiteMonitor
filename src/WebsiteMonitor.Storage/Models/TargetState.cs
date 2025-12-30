@@ -9,6 +9,13 @@ public sealed class TargetState
     public DateTime StateSinceUtc { get; set; }
     public DateTime LastChangeUtc { get; set; }
 
+	public string? LastFinalUrl { get; set; }
+	public string? LastUsedIp { get; set; }
+	public string? LastDetectedLoginType { get; set; }
+
+	public bool LoginDetectedEver { get; set; }
+	public bool LoginDetectedLast { get; set; }
+
     public int ConsecutiveFailures { get; set; }
     public string LastSummary { get; set; } = "";
 

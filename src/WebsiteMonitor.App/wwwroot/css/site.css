@@ -1,0 +1,16 @@
+﻿html, body {
+  font-family: Calibri, Candara, "Segoe UI", Segoe, Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.2;
+  margin: 0;
+}
+
+h1 { font-size: 16px; font-weight: 600; margin: 4px 0; }
+h2 { font-size: 14px; font-weight: 600; margin: 4px 0; }
+
+.wm-meta { font-size: 11px; margin: 0 0 6px 0; opacity: 0.85; }
+.wm-nav  { margin: 0 0 6px 0; }
+
+table { border-collapse: collapse; }
+th, td { padding: 3px 6px; vertical-align: top; white-space: nowrap; }
+td:last-child { white-space: normal; }

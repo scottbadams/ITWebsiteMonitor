@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
+using System.Text;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -116,19 +118,24 @@ public sealed class TargetCheckService
 
         var tcpOk = tcp.ok;
         var httpOk = http.ok;
+
         var summary = BuildSummary(tcpOk, tcp.latencyMs, httpOk, http.statusCode, http.latencyMs);
 
         return new TargetCheckResult(
-            t.InstanceId,
-            t.TargetId,
-            t.Url,
-            ts,
-            tcpOk,
-            httpOk,
-            http.statusCode,
-            tcp.latencyMs,
-            http.latencyMs,
-            summary);
+            InstanceId: t.InstanceId,
+            TargetId: t.TargetId,
+            Url: t.Url,
+            TimestampUtc: ts,
+            TcpOk: tcpOk,
+            HttpOk: httpOk,
+            HttpStatusCode: http.statusCode,
+            TcpLatencyMs: tcp.latencyMs,
+            HttpLatencyMs: http.latencyMs,
+            Summary: summary,
+            FinalUrl: http.finalUrl,
+            UsedIp: tcp.usedIp,
+            LoginDetected: http.loginDetected,
+            DetectedLoginType: http.detectedLoginType);
     }
 
     private static string BuildSummary(bool tcpOk, int? tcpMs, bool httpOk, int? code, int? httpMs)
@@ -138,38 +145,75 @@ public sealed class TargetCheckService
         return $"{tcpPart}; {httpPart}";
     }
 
-    private static async Task<(bool ok, int? latencyMs)> TcpCheckAsync(string url, CancellationToken ct)
+    private static async Task<(bool ok, int? latencyMs, string? usedIp)> TcpCheckAsync(string url, CancellationToken ct)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
-            return (false, null);
+            return (false, null, null);
 
         var host = uri.Host;
         var port = uri.IsDefaultPort
             ? (uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase) ? 443 : 80)
             : uri.Port;
 
-        using var client = new TcpClient();
-        var sw = Stopwatch.StartNew();
+        IPAddress[] addrs;
         try
         {
-            await client.ConnectAsync(host, port, ct);
-            sw.Stop();
-            return (true, (int)sw.ElapsedMilliseconds);
+            // Note: no CT overload on all platforms; keep it simple.
+            addrs = await Dns.GetHostAddressesAsync(host);
         }
         catch
         {
+            addrs = Array.Empty<IPAddress>();
+        }
+
+        // We'll try resolved IPs first (so we can record UsedIp).
+        // If no resolved IPs, fall back to hostname connect (UsedIp unknown).
+        var sw = Stopwatch.StartNew();
+
+        if (addrs.Length > 0)
+        {
+            foreach (var ip in addrs)
+            {
+                using var client = new TcpClient();
+                try
+                {
+                    await client.ConnectAsync(new IPEndPoint(ip, port), ct);
+                    sw.Stop();
+                    return (true, (int)sw.ElapsedMilliseconds, ip.ToString());
+                }
+                catch
+                {
+                    // try next
+                }
+            }
+
             sw.Stop();
-            return (false, (int)sw.ElapsedMilliseconds);
+            // If all IPs failed, still report the first IP we attempted (best-effort visibility).
+            return (false, (int)sw.ElapsedMilliseconds, addrs[0].ToString());
+        }
+        else
+        {
+            using var client = new TcpClient();
+            try
+            {
+                await client.ConnectAsync(host, port, ct);
+                sw.Stop();
+                return (true, (int)sw.ElapsedMilliseconds, null);
+            }
+            catch
+            {
+                sw.Stop();
+                return (false, (int)sw.ElapsedMilliseconds, null);
+            }
         }
     }
 
-    private async Task<(bool ok, int? statusCode, int? latencyMs)> HttpCheckAsync(Target t, CancellationToken ct)
+    private async Task<(bool ok, int? statusCode, int? latencyMs, string? finalUrl, bool loginDetected, string? detectedLoginType)> HttpCheckAsync(Target t, CancellationToken ct)
     {
         if (!Uri.TryCreate(t.Url, UriKind.Absolute, out var uri))
-            return (false, null, null);
+            return (false, null, null, null, false, null);
 
         var client = _httpClientFactory.CreateClient("monitor");
-
         using var req = new HttpRequestMessage(HttpMethod.Get, uri);
 
         var sw = Stopwatch.StartNew();
@@ -178,19 +222,74 @@ public sealed class TargetCheckService
             using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
             sw.Stop();
 
+            // Final URL after redirects (if redirects are enabled in the handler)
+            string? finalUrl = resp.RequestMessage?.RequestUri?.ToString();
+
             var code = (int)resp.StatusCode;
             var min = t.HttpExpectedStatusMin ?? 200;
             var max = t.HttpExpectedStatusMax ?? 399;
 
             var ok = code >= min && code <= max;
-            return (ok, code, (int)sw.ElapsedMilliseconds);
+
+            // Minimal login detection heuristic:
+            // - only attempt if response is HTML-ish
+            bool loginDetected = false;
+            string? detectedLoginType = null;
+
+            if (resp.Content?.Headers?.ContentType?.MediaType != null)
+            {
+                var mt = resp.Content.Headers.ContentType.MediaType;
+                if (mt.Contains("html", StringComparison.OrdinalIgnoreCase))
+                {
+                    var snippet = await ReadBodySnippetAsync(resp.Content, maxBytes: 64 * 1024, ct);
+
+                    // Very simple signals
+                    if (ContainsIgnoreCase(snippet, "type=\"password\"") || ContainsIgnoreCase(snippet, "type='password'"))
+                    {
+                        loginDetected = true;
+                        detectedLoginType = "PasswordForm";
+                    }
+                    else if (ContainsIgnoreCase(snippet, "login") && (ContainsIgnoreCase(snippet, "username") || ContainsIgnoreCase(snippet, "email")))
+                    {
+                        loginDetected = true;
+                        detectedLoginType = "LoginPage";
+                    }
+                }
+            }
+
+            return (ok, code, (int)sw.ElapsedMilliseconds, finalUrl, loginDetected, detectedLoginType);
         }
         catch
         {
             sw.Stop();
-            return (false, null, (int)sw.ElapsedMilliseconds);
+            return (false, null, (int)sw.ElapsedMilliseconds, null, false, null);
         }
     }
+
+    private static async Task<string> ReadBodySnippetAsync(HttpContent content, int maxBytes, CancellationToken ct)
+    {
+        await using var stream = await content.ReadAsStreamAsync(ct);
+
+        var buf = new byte[8192];
+        var total = 0;
+        using var ms = new MemoryStream(Math.Min(maxBytes, 64 * 1024));
+
+        while (total < maxBytes)
+        {
+            var toRead = Math.Min(buf.Length, maxBytes - total);
+            var read = await stream.ReadAsync(buf.AsMemory(0, toRead), ct);
+            if (read <= 0) break;
+
+            ms.Write(buf, 0, read);
+            total += read;
+        }
+
+        // Best-effort decode. (If it isn't UTF-8, the heuristic will just be less accurate.)
+        return Encoding.UTF8.GetString(ms.ToArray());
+    }
+
+    private static bool ContainsIgnoreCase(string haystack, string needle)
+        => haystack.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
 
     private async Task PersistBatchAsync(List<TargetCheckResult> results, CancellationToken ct)
     {
@@ -217,7 +316,12 @@ public sealed class TargetCheckService
                     HttpStatusCode = r.HttpStatusCode,
                     TcpLatencyMs = r.TcpLatencyMs,
                     HttpLatencyMs = r.HttpLatencyMs,
-                    Summary = r.Summary
+                    Summary = r.Summary,
+
+                    FinalUrl = r.FinalUrl,
+                    UsedIp = r.UsedIp,
+                    DetectedLoginType = r.DetectedLoginType,
+                    LoginDetected = r.LoginDetected
                 });
 
                 var isUp = r.TcpOk && r.HttpOk;
@@ -232,8 +336,15 @@ public sealed class TargetCheckService
                         StateSinceUtc = r.TimestampUtc,
                         LastChangeUtc = r.TimestampUtc,
                         ConsecutiveFailures = isUp ? 0 : 1,
-                        LastSummary = r.Summary
+                        LastSummary = r.Summary,
+
+                        LastFinalUrl = r.FinalUrl,
+                        LastUsedIp = r.UsedIp,
+                        LastDetectedLoginType = r.DetectedLoginType,
+                        LoginDetectedLast = r.LoginDetected,
+                        LoginDetectedEver = r.LoginDetected
                     };
+
                     db.States.Add(state);
                     stateMap[r.TargetId] = state;
                 }
@@ -243,6 +354,13 @@ public sealed class TargetCheckService
 
                     state.LastCheckUtc = r.TimestampUtc;
                     state.LastSummary = r.Summary;
+
+                    // Carry forward the most recent observed values (even if DOWN)
+                    state.LastFinalUrl = r.FinalUrl ?? state.LastFinalUrl;
+                    state.LastUsedIp = r.UsedIp ?? state.LastUsedIp;
+                    state.LastDetectedLoginType = r.DetectedLoginType ?? state.LastDetectedLoginType;
+                    state.LoginDetectedLast = r.LoginDetected;
+                    state.LoginDetectedEver = state.LoginDetectedEver || r.LoginDetected;
 
                     if (changed)
                     {

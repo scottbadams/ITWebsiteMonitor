@@ -19,4 +19,6 @@ public sealed class Instance
     public string? OutputFolder { get; set; } = null;
 
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+	
+	public DateTime? LastRunUtc { get; set; }
 }

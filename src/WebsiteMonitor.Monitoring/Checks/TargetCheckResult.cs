@@ -10,4 +10,8 @@ public sealed record TargetCheckResult(
     int? HttpStatusCode,
     int? TcpLatencyMs,
     int? HttpLatencyMs,
-    string Summary);
+    string Summary,
+    string? FinalUrl,
+    string? UsedIp,
+    bool LoginDetected,
+    string? DetectedLoginType);
