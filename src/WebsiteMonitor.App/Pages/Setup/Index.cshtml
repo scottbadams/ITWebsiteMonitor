@@ -45,11 +45,15 @@
                     <button type="submit">Restart</button>
                 </form>
             </td>
-            <td>
-                <a href="/setup/instances/@i.InstanceId">Configure</a>
-                |
-                <a href="/monitor/@i.InstanceId">Monitor</a>
-            </td>
+			<td>
+				<a href="/setup/instances/@i.InstanceId">Configure</a>
+				|
+				<a href="/setup/instances/notifications?instanceId=@i.InstanceId">Notifications</a>
+				|
+				<a href="/monitor/@i.InstanceId">Monitor</a>
+				|
+				<a href="/setup/instances/webhook-test?instanceId=@i.InstanceId">Webhook Test</a>
+			</td>
         </tr>
 }
     </tbody>

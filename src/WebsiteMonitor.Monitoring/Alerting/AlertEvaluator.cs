@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using WebsiteMonitor.Notifications.Smtp;
+using WebsiteMonitor.Notifications.Webhooks;
 using WebsiteMonitor.Storage.Data;
 using WebsiteMonitor.Storage.Models;
 
@@ -37,12 +38,12 @@ public sealed class AlertEvaluator
         if (!instanceRunning)
             return;
 
-        // IMPORTANT: DbContext must be scoped per call (DbContext is not thread-safe)
         using var scope = _scopeFactory.CreateScope();
         var sp = scope.ServiceProvider;
 
         var db = sp.GetRequiredService<WebsiteMonitorDbContext>();
         var smtpSender = sp.GetRequiredService<ISmtpSender>();
+        var webhookSender = sp.GetRequiredService<IWebhookSender>();
         var dp = sp.GetRequiredService<IDataProtectionProvider>();
 
         var instance = await db.Instances.SingleOrDefaultAsync(i => i.InstanceId == instanceId, ct);
@@ -64,7 +65,7 @@ public sealed class AlertEvaluator
             .Where(s => targetIds.Contains(s.TargetId))
             .ToListAsync(ct);
 
-        // Load recipients + SMTP once per instance evaluation
+        // Email channel
         var recipientEmails = await db.Recipients
             .Where(r => r.InstanceId == instanceId && r.Enabled)
             .Select(r => r.Email)
@@ -73,17 +74,27 @@ public sealed class AlertEvaluator
         var smtpSettings = await db.SmtpSettings
             .SingleOrDefaultAsync(s => s.InstanceId == instanceId, ct);
 
-        // If not configured, we can’t send automatic alerts
-        if (smtpSettings == null ||
-            string.IsNullOrWhiteSpace(smtpSettings.Host) ||
-            smtpSettings.Port <= 0 ||
-            string.IsNullOrWhiteSpace(smtpSettings.FromAddress) ||
-            recipientEmails.Count == 0)
-        {
-            return;
-        }
+        var emailConfigured =
+            smtpSettings != null &&
+            !string.IsNullOrWhiteSpace(smtpSettings.Host) &&
+            smtpSettings.Port > 0 &&
+            !string.IsNullOrWhiteSpace(smtpSettings.FromAddress) &&
+            recipientEmails.Count > 0;
 
-        string? smtpPasswordPlain = TryUnprotectSmtpPassword(dp, smtpSettings, instanceId);
+        string? smtpPasswordPlain = null;
+        if (emailConfigured && smtpSettings != null)
+            smtpPasswordPlain = TryUnprotectSmtpPassword(dp, smtpSettings, instanceId);
+
+        // Webhook channel
+        var webhookUrls = await db.WebhookEndpoints
+            .Where(w => w.InstanceId == instanceId && w.Enabled)
+            .Select(w => w.Url)
+            .ToListAsync(ct);
+
+        var webhooksConfigured = webhookUrls.Count > 0;
+
+        if (!emailConfigured && !webhooksConfigured)
+            return;
 
         foreach (var s in states)
         {
@@ -92,11 +103,20 @@ public sealed class AlertEvaluator
 
             if (!s.IsUp)
             {
-                await HandleDownAsync(db, smtpSender, tz, recipientEmails, instanceId, target, s, smtpSettings, smtpPasswordPlain, nowUtc, ct);
+                await HandleDownAsync(
+                    db,
+                    emailConfigured, smtpSender, smtpSettings, smtpPasswordPlain, recipientEmails,
+                    webhooksConfigured, webhookSender, webhookUrls,
+                    tz,
+                    instanceId, target, s, nowUtc, ct);
             }
             else
             {
-                await HandleUpAsync(db, smtpSender, recipientEmails, instanceId, target, s, smtpSettings, smtpPasswordPlain, nowUtc, ct);
+                await HandleUpAsync(
+                    db,
+                    emailConfigured, smtpSender, smtpSettings, smtpPasswordPlain, recipientEmails,
+                    webhooksConfigured, webhookSender, webhookUrls,
+                    instanceId, target, s, nowUtc, ct);
             }
         }
 
@@ -122,14 +142,18 @@ public sealed class AlertEvaluator
 
     private async Task HandleDownAsync(
         WebsiteMonitorDbContext db,
+        bool emailConfigured,
         ISmtpSender smtpSender,
-        TimeZoneInfo tz,
+        SmtpSettings? smtpSettings,
+        string? smtpPasswordPlain,
         List<string> recipientEmails,
+        bool webhooksConfigured,
+        IWebhookSender webhookSender,
+        List<string> webhookUrls,
+        TimeZoneInfo tz,
         string instanceId,
         Target target,
         TargetState state,
-        SmtpSettings smtpSettings,
-        string? smtpPasswordPlain,
         DateTime nowUtc,
         CancellationToken ct)
     {
@@ -140,33 +164,24 @@ public sealed class AlertEvaluator
         if (state.DownFirstNotifiedUtc == null &&
             downAge >= TimeSpan.FromSeconds(_opt.DownAfterSeconds))
         {
-            var sent = await TrySendAlertEmailAsync(
-                smtpSender,
-                smtpSettings,
-                smtpPasswordPlain,
-                recipientEmails,
+            var notified = await NotifyAsync(
+                db,
+                "AlertDown",
+                emailConfigured, smtpSender, smtpSettings, smtpPasswordPlain, recipientEmails,
+                webhooksConfigured, webhookSender, webhookUrls,
+                instanceId, target, state, nowUtc,
                 subject: $"DOWN {target.Url}",
                 bodyText: BuildDownBody(instanceId, target, state, downStartUtc, nowUtc, tz),
                 ct: ct);
 
-            if (!sent)
+            if (!notified)
             {
-                db.Events.Add(new Event
-                {
-                    InstanceId = instanceId,
-                    TargetId = target.TargetId,
-                    TimestampUtc = nowUtc,
-                    Type = "Error",
-                    Message = $"Failed to send DOWN email for {target.Url}"
-                });
                 _logger.LogError("ALERT SEND FAILED: DOWN Instance={InstanceId} TargetId={TargetId} Url={Url}", instanceId, target.TargetId, target.Url);
                 return;
             }
 
             state.DownFirstNotifiedUtc = nowUtc;
             state.LastNotifiedUtc = nowUtc;
-
-            // Compute next repeat schedule (based on successful send time)
             state.NextNotifyUtc = ComputeNextDownNotifyUtc(downStartUtc, nowUtc, tz, nowUtc);
 
             db.Events.Add(new Event
@@ -187,25 +202,18 @@ public sealed class AlertEvaluator
             state.NextNotifyUtc != null &&
             nowUtc >= state.NextNotifyUtc.Value)
         {
-            var sent = await TrySendAlertEmailAsync(
-                smtpSender,
-                smtpSettings,
-                smtpPasswordPlain,
-                recipientEmails,
+            var notified = await NotifyAsync(
+                db,
+                "AlertDownRepeat",
+                emailConfigured, smtpSender, smtpSettings, smtpPasswordPlain, recipientEmails,
+                webhooksConfigured, webhookSender, webhookUrls,
+                instanceId, target, state, nowUtc,
                 subject: $"DOWN (repeat) {target.Url}",
-                bodyText: BuildDownRepeatBody(instanceId, target, state, downStartUtc, nowUtc, tz),
+                bodyText: BuildDownBody(instanceId, target, state, downStartUtc, nowUtc, tz),
                 ct: ct);
 
-            if (!sent)
+            if (!notified)
             {
-                db.Events.Add(new Event
-                {
-                    InstanceId = instanceId,
-                    TargetId = target.TargetId,
-                    TimestampUtc = nowUtc,
-                    Type = "Error",
-                    Message = $"Failed to send DOWN repeat email for {target.Url}"
-                });
                 _logger.LogError("ALERT SEND FAILED: DOWN REPEAT Instance={InstanceId} TargetId={TargetId} Url={Url}", instanceId, target.TargetId, target.Url);
                 return;
             }
@@ -228,17 +236,21 @@ public sealed class AlertEvaluator
 
     private async Task HandleUpAsync(
         WebsiteMonitorDbContext db,
+        bool emailConfigured,
         ISmtpSender smtpSender,
+        SmtpSettings? smtpSettings,
+        string? smtpPasswordPlain,
         List<string> recipientEmails,
+        bool webhooksConfigured,
+        IWebhookSender webhookSender,
+        List<string> webhookUrls,
         string instanceId,
         Target target,
         TargetState state,
-        SmtpSettings smtpSettings,
-        string? smtpPasswordPlain,
         DateTime nowUtc,
         CancellationToken ct)
     {
-        // Your rule: recovered only if a DOWN alert was actually sent for this outage
+        // Recovered only if a DOWN alert was actually sent for this outage
         if (state.DownFirstNotifiedUtc == null)
         {
             state.RecoveredDueUtc = null;
@@ -249,32 +261,24 @@ public sealed class AlertEvaluator
         if (state.RecoveredNotifiedUtc != null)
             return;
 
-        // Recovered alert due after N seconds continuous UP
         if (state.RecoveredDueUtc == null)
             state.RecoveredDueUtc = state.StateSinceUtc.AddSeconds(_opt.RecoveredAfterSeconds);
 
         if (nowUtc < state.RecoveredDueUtc.Value)
             return;
 
-        var sent = await TrySendAlertEmailAsync(
-            smtpSender,
-            smtpSettings,
-            smtpPasswordPlain,
-            recipientEmails,
+        var notified = await NotifyAsync(
+            db,
+            "AlertRecovered",
+            emailConfigured, smtpSender, smtpSettings, smtpPasswordPlain, recipientEmails,
+            webhooksConfigured, webhookSender, webhookUrls,
+            instanceId, target, state, nowUtc,
             subject: $"RECOVERED {target.Url}",
             bodyText: BuildRecoveredBody(instanceId, target, state, nowUtc),
             ct: ct);
 
-        if (!sent)
+        if (!notified)
         {
-            db.Events.Add(new Event
-            {
-                InstanceId = instanceId,
-                TargetId = target.TargetId,
-                TimestampUtc = nowUtc,
-                Type = "Error",
-                Message = $"Failed to send RECOVERED email for {target.Url}"
-            });
             _logger.LogError("ALERT SEND FAILED: RECOVERED Instance={InstanceId} TargetId={TargetId} Url={Url}", instanceId, target.TargetId, target.Url);
             return;
         }
@@ -299,6 +303,78 @@ public sealed class AlertEvaluator
         state.RecoveredDueUtc = null;
     }
 
+    private async Task<bool> NotifyAsync(
+        WebsiteMonitorDbContext db,
+        string eventType,
+        bool emailConfigured,
+        ISmtpSender smtpSender,
+        SmtpSettings? smtpSettings,
+        string? smtpPasswordPlain,
+        List<string> recipients,
+        bool webhooksConfigured,
+        IWebhookSender webhookSender,
+        List<string> webhookUrls,
+        string instanceId,
+        Target target,
+        TargetState state,
+        DateTime nowUtc,
+        string subject,
+        string bodyText,
+        CancellationToken ct)
+    {
+        var emailOk = false;
+        var webhookOk = false;
+
+        if (emailConfigured && smtpSettings != null)
+        {
+            emailOk = await TrySendAlertEmailAsync(
+                smtpSender, smtpSettings, smtpPasswordPlain, recipients, subject, bodyText, ct);
+
+            if (!emailOk)
+            {
+                db.Events.Add(new Event
+                {
+                    InstanceId = instanceId,
+                    TargetId = target.TargetId,
+                    TimestampUtc = nowUtc,
+                    Type = "Error",
+                    Message = $"Failed to send EMAIL for {eventType} {target.Url}"
+                });
+            }
+        }
+
+        if (webhooksConfigured)
+        {
+            var payload = new
+            {
+                eventType,
+                instanceId,
+                targetId = target.TargetId,
+                url = target.Url,
+                isUp = state.IsUp,
+                stateSinceUtc = state.StateSinceUtc,
+                timestampUtc = nowUtc,
+                summary = state.LastSummary
+            };
+
+            webhookOk = await TrySendWebhooksAsync(webhookSender, webhookUrls, payload, ct);
+
+            if (!webhookOk)
+            {
+                db.Events.Add(new Event
+                {
+                    InstanceId = instanceId,
+                    TargetId = target.TargetId,
+                    TimestampUtc = nowUtc,
+                    Type = "Error",
+                    Message = $"Failed to send WEBHOOK for {eventType} {target.Url}"
+                });
+            }
+        }
+
+        return emailOk || webhookOk;
+    }
+
     private async Task<bool> TrySendAlertEmailAsync(
         ISmtpSender smtpSender,
         SmtpSettings smtpSettings,
@@ -308,22 +384,47 @@ public sealed class AlertEvaluator
         string bodyText,
         CancellationToken ct)
     {
-        // Minimal behavior: send one email per recipient; return false if any fail.
+        var anyOk = false;
+
         foreach (var to in recipients)
         {
             try
             {
                 await smtpSender.SendAsync(smtpSettings, smtpPasswordPlain, to, subject, bodyText, ct);
+                anyOk = true;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "SMTP send failed To={To} Host={Host}:{Port} From={From}",
                     to, smtpSettings.Host, smtpSettings.Port, smtpSettings.FromAddress);
-                return false;
             }
         }
 
-        return true;
+        return anyOk;
+    }
+
+    private async Task<bool> TrySendWebhooksAsync(
+        IWebhookSender sender,
+        List<string> urls,
+        object payload,
+        CancellationToken ct)
+    {
+        var anyOk = false;
+
+        foreach (var url in urls)
+        {
+            try
+            {
+                await sender.PostAsync(url, payload, ct);
+                anyOk = true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Webhook POST failed Url={Url}", url);
+            }
+        }
+
+        return anyOk;
     }
 
     private static string BuildDownBody(string instanceId, Target target, TargetState state, DateTime downStartUtc, DateTime nowUtc, TimeZoneInfo tz)
@@ -342,9 +443,6 @@ Down duration: {downFor}
 Consecutive failures: {state.ConsecutiveFailures}
 Last summary: {state.LastSummary}";
     }
-
-    private static string BuildDownRepeatBody(string instanceId, Target target, TargetState state, DateTime downStartUtc, DateTime nowUtc, TimeZoneInfo tz)
-        => BuildDownBody(instanceId, target, state, downStartUtc, nowUtc, tz);
 
     private static string BuildRecoveredBody(string instanceId, Target target, TargetState state, DateTime nowUtc)
     {
@@ -380,7 +478,6 @@ Last summary: {state.LastSummary}";
 
         var candidateUtc = _tz.ToUtc(candidateLocal, tz);
 
-        // Next occurrence strictly after now
         if (candidateUtc <= nowUtc)
         {
             candidateLocal = candidateLocal.AddDays(1);
@@ -402,7 +499,6 @@ Last summary: {state.LastSummary}";
             }
             catch (SqliteException ex) when ((ex.SqliteErrorCode == 5 || ex.SqliteErrorCode == 6) && attempt <= 10)
             {
-                // 5=SQLITE_BUSY, 6=SQLITE_LOCKED
                 _logger.LogWarning(ex,
                     "SQLite busy/locked in AlertEvaluator; attempt {Attempt}/10 Err={Err} ExtErr={ExtErr}.",
                     attempt, ex.SqliteErrorCode, ex.SqliteExtendedErrorCode);

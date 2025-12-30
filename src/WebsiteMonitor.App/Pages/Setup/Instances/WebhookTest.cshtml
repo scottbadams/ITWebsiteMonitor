@@ -1,0 +1,29 @@
+@page "/setup/instances/{instanceId}/webhooktest"
+@model WebsiteMonitor.App.Pages.Setup.Instances.WebhookTestModel
+
+<h1>Webhook Test - @Model.InstanceId</h1>
+
+<p>
+  <a href="/setup/instances/notifications?instanceId=@Model.InstanceId">Back to Notifications</a>
+</p>
+
+@if (!string.IsNullOrWhiteSpace(Model.Info)) { <p style="color: green;">@Model.Info</p> }
+@if (!string.IsNullOrWhiteSpace(Model.Error)) { <p style="color: #b00;">@Model.Error</p> }
+
+<h2>Enabled Webhooks</h2>
+
+@if (Model.EnabledUrls.Count == 0)
+{
+  <p>No enabled webhooks found.</p>
+}
+else
+{
+  <ul>
+  @foreach (var u in Model.EnabledUrls) { <li>@u</li> }
+  </ul>
+
+  <form method="post" asp-page-handler="Send">
+    <input type="hidden" name="InstanceId" value="@Model.InstanceId" />
+    <button type="submit">Send Test Webhook</button>
+  </form>
+}

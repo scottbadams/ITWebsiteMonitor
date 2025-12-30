@@ -1,0 +1,83 @@
+@page "/setup/instances/notifications"
+@model WebsiteMonitor.App.Pages.Setup.Instances.NotificationsModel
+
+<h1>Notifications - @Model.InstanceId</h1>
+
+<p>
+  <a href="/setup">Back to Setup</a> |
+  <a href="/setup/instances/@Model.InstanceId/smtptest">SMTP Test</a> |
+  <a href="/setup/instances/@Model.InstanceId/webhooktest">Webhook Test</a>
+</p>
+
+@if (!string.IsNullOrWhiteSpace(Model.Info)) { <p style="color: green;">@Model.Info</p> }
+@if (!string.IsNullOrWhiteSpace(Model.Error)) { <p style="color: #b00;">@Model.Error</p> }
+
+<h2>Recipients</h2>
+
+<form method="post" asp-page-handler="AddRecipient">
+  <input type="hidden" name="InstanceId" value="@Model.InstanceId" />
+  <input name="NewRecipientEmail" value="" placeholder="email@domain.com" style="width: 320px;" />
+  <button type="submit">Add</button>
+</form>
+
+<table border="1" cellpadding="6" cellspacing="0" style="margin-top: 10px;">
+  <thead>
+    <tr><th>Email</th><th>Enabled</th><th>Actions</th></tr>
+  </thead>
+  <tbody>
+  @foreach (var r in Model.Recipients)
+  {
+    <tr>
+      <td>@r.Email</td>
+      <td>@r.Enabled</td>
+      <td>
+        <form method="post" asp-page-handler="ToggleRecipient" style="display:inline;">
+          <input type="hidden" name="InstanceId" value="@Model.InstanceId" />
+          <input type="hidden" name="id" value="@r.RecipientId" />
+          <button type="submit">Toggle</button>
+        </form>
+        <form method="post" asp-page-handler="DeleteRecipient" style="display:inline;">
+          <input type="hidden" name="InstanceId" value="@Model.InstanceId" />
+          <input type="hidden" name="id" value="@r.RecipientId" />
+          <button type="submit" onclick="return confirm('Delete recipient?');">Delete</button>
+        </form>
+      </td>
+    </tr>
+  }
+  </tbody>
+</table>
+
+<h2 style="margin-top: 24px;">Webhooks</h2>
+
+<form method="post" asp-page-handler="AddWebhook">
+  <input type="hidden" name="InstanceId" value="@Model.InstanceId" />
+  <input name="NewWebhookUrl" value="" placeholder="https://example.com/webhook" style="width: 520px;" />
+  <button type="submit">Add</button>
+</form>
+
+<table border="1" cellpadding="6" cellspacing="0" style="margin-top: 10px;">
+  <thead>
+    <tr><th>URL</th><th>Enabled</th><th>Actions</th></tr>
+  </thead>
+  <tbody>
+  @foreach (var w in Model.Webhooks)
+  {
+    <tr>
+      <td>@w.Url</td>
+      <td>@w.Enabled</td>
+      <td>
+        <form method="post" asp-page-handler="ToggleWebhook" style="display:inline;">
+          <input type="hidden" name="InstanceId" value="@Model.InstanceId" />
+          <input type="hidden" name="id" value="@w.WebhookEndpointId" />
+          <button type="submit">Toggle</button>
+        </form>
+        <form method="post" asp-page-handler="DeleteWebhook" style="display:inline;">
+          <input type="hidden" name="InstanceId" value="@Model.InstanceId" />
+          <input type="hidden" name="id" value="@w.WebhookEndpointId" />
+          <button type="submit" onclick="return confirm('Delete webhook?');">Delete</button>
+        </form>
+      </td>
+    </tr>
+  }
+  </tbody>
+</table>

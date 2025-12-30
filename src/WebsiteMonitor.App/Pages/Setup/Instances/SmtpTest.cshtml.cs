@@ -34,6 +34,10 @@ public sealed class SmtpTestModel : PageModel
     public string? Error { get; set; }
     public string? Info { get; set; }
 
+	[BindProperty]
+	public string? NewPassword { get; set; }
+
+
     public async Task<IActionResult> OnGetAsync()
     {
         if (string.IsNullOrWhiteSpace(InstanceId))
@@ -83,6 +87,13 @@ public sealed class SmtpTestModel : PageModel
             Error = "Recipient (To) is required.";
             return Page();
         }
+
+		if (!string.IsNullOrWhiteSpace(NewPassword))
+		{
+			smtp.PasswordProtected = _protector.Protect(NewPassword);
+			smtp.UpdatedUtc = DateTime.UtcNow;
+			await _db.SaveChangesAsync(HttpContext.RequestAborted);
+		}
 
         string? pw = null;
         if (!string.IsNullOrWhiteSpace(smtp.PasswordProtected))

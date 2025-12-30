@@ -19,6 +19,7 @@ public sealed class WebsiteMonitorDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<Event> Events => Set<Event>();
 	public DbSet<SmtpSettings> SmtpSettings => Set<SmtpSettings>();
 	public DbSet<Recipient> Recipients => Set<Recipient>();
+	public DbSet<WebhookEndpoint> WebhookEndpoints => Set<WebhookEndpoint>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -52,6 +53,14 @@ public sealed class WebsiteMonitorDbContext : IdentityDbContext<ApplicationUser>
 			b.HasIndex(x => new { x.InstanceId, x.Email }).IsUnique();
 		});
 
+		modelBuilder.Entity<WebhookEndpoint>(b =>
+		{
+			b.ToTable("WebhookEndpoints");
+			b.HasKey(x => x.WebhookEndpointId);
+			b.Property(x => x.InstanceId).HasMaxLength(64).IsRequired();
+			b.Property(x => x.Url).HasMaxLength(2048).IsRequired();
+			b.HasIndex(x => new { x.InstanceId, x.Url }).IsUnique();
+		});
 
         modelBuilder.Entity<WebsiteMonitor.Storage.Models.Target>(b =>
         {

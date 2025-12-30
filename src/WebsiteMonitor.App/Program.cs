@@ -33,6 +33,12 @@ builder.Services.AddDataProtection()
 
 builder.Services.AddSingleton<WebsiteMonitor.App.Infrastructure.SmtpPasswordProtector>();
 
+builder.Services.AddHttpClient<WebsiteMonitor.Notifications.Webhooks.IWebhookSender,
+    WebsiteMonitor.Notifications.Webhooks.HttpClientWebhookSender>(c =>
+{
+    c.Timeout = TimeSpan.FromSeconds(10);
+});
+
 // --------------------
 // Services
 // --------------------
