@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using WebsiteMonitor.App.Infrastructure;
+using WebsiteMonitor.App.Snapshots;
 using WebsiteMonitor.Storage.Data;
 using WebsiteMonitor.Storage.Identity;
 using WebsiteMonitor.Monitoring.HostedServices;
@@ -31,8 +32,8 @@ builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(paths.DataProtectionKeysDir))
     .SetApplicationName("ITWebsiteMonitor");
 
+builder.Services.AddSingleton(paths);
 builder.Services.AddSingleton<WebsiteMonitor.App.Infrastructure.SmtpPasswordProtector>();
-
 builder.Services.AddHttpClient<WebsiteMonitor.Notifications.Webhooks.IWebhookSender,
     WebsiteMonitor.Notifications.Webhooks.HttpClientWebhookSender>(c =>
 {
@@ -76,6 +77,9 @@ builder.Services.AddAuthorization();
 builder.Services.AddRazorPages();
 builder.Services.AddControllers();
 builder.Services.AddSingleton<WebsiteMonitor.Monitoring.Checks.TargetCheckService>();
+
+builder.Services.Configure<SnapshotOptions>(builder.Configuration.GetSection("WebsiteMonitor:Snapshots"));
+builder.Services.AddHostedService<HtmlSnapshotHostedService>();
 
 builder.Services.AddHttpClient("monitor")
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
