@@ -17,7 +17,8 @@ public sealed class IndexModel : PageModel
     public string InstanceId { get; set; } = "";
 
     public string DisplayName { get; private set; } = "";
-    public string LastCheckUtc { get; private set; } = "";
+    public string LastCheckLocal { get; private set; } = "";
+    public string TimeZoneLabel { get; private set; } = ""; // what we’re displaying in (server local or instance override)
 
     public sealed record Row(
         long TargetId,
@@ -27,7 +28,7 @@ public sealed class IndexModel : PageModel
         string Http,
         string Check,
         string State,          // Up / Down / Unknown / Degraded
-        string SinceUtc,       // yyyy-MM-dd HH:mm:ss (UTC)
+        string SinceLocal,     // yyyy-MM-dd HH:mm:ss (in display TZ)
         string DurationSeconds // baseline for the JS timer
     );
 
@@ -39,7 +40,8 @@ public sealed class IndexModel : PageModel
         if (data == null) return NotFound();
 
         DisplayName = data.Value.displayName;
-        LastCheckUtc = data.Value.lastCheckUtc;
+        LastCheckLocal = data.Value.lastCheckLocal;
+        TimeZoneLabel = data.Value.timeZoneLabel;
         Rows = data.Value.rows;
 
         return Page();
@@ -60,8 +62,9 @@ public sealed class IndexModel : PageModel
         {
             instanceId = InstanceId,
             displayName = data.Value.displayName,
+            timeZoneLabel = data.Value.timeZoneLabel,
             nowUtc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
-            lastCheckUtc = data.Value.lastCheckUtc,
+            lastCheckLocal = data.Value.lastCheckLocal,
             rows = data.Value.rows.Select(r => new
             {
                 targetId = r.TargetId,
@@ -71,13 +74,13 @@ public sealed class IndexModel : PageModel
                 http = r.Http,
                 check = r.Check,
                 state = r.State,
-                sinceUtc = r.SinceUtc,
+                sinceLocal = r.SinceLocal,
                 durationSeconds = r.DurationSeconds
-            })
+            }).ToList()
         });
     }
 
-    private async Task<(string displayName, string lastCheckUtc, List<Row> rows)?> BuildDataAsync(CancellationToken ct)
+    private async Task<(string displayName, string lastCheckLocal, string timeZoneLabel, List<Row> rows)?> BuildDataAsync(CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(InstanceId))
             return null;
@@ -89,6 +92,11 @@ public sealed class IndexModel : PageModel
         if (instance == null)
             return null;
 
+        // Decide what timezone to DISPLAY in:
+        // - If instance.TimeZoneId resolves -> use it (per-instance override)
+        // - Otherwise -> server local
+        var displayTz = ResolveDisplayTimeZone(instance.TimeZoneId, out var tzLabel);
+
         var nowUtc = DateTime.UtcNow;
 
         var targets = await _db.Targets
@@ -97,9 +105,6 @@ public sealed class IndexModel : PageModel
             .OrderBy(t => t.TargetId)
             .ToListAsync(ct);
 
-        if (targets.Count == 0)
-            return (instance.DisplayName, "", new List<Row>());
-
         var targetIds = targets.Select(t => t.TargetId).ToList();
 
         var states = await _db.States
@@ -107,27 +112,39 @@ public sealed class IndexModel : PageModel
             .Where(s => targetIds.Contains(s.TargetId))
             .ToDictionaryAsync(s => s.TargetId, ct);
 
-        // Latest check per target - KEEP THIS AS A SERVER-TRANSLATABLE QUERY (no ToList before join)
-        var latestTsQuery =
-            from c in _db.Checks.AsNoTracking()
-            where targetIds.Contains(c.TargetId)
-            group c by c.TargetId into g
-            select new { TargetId = g.Key, Ts = g.Max(x => x.TimestampUtc) };
+        // Latest check per target (materialized on server)
+        var latestTimes = await _db.Checks
+            .AsNoTracking()
+            .Where(c => targetIds.Contains(c.TargetId))
+            .GroupBy(c => c.TargetId)
+            .Select(g => new { TargetId = g.Key, Ts = g.Max(x => x.TimestampUtc) })
+            .ToListAsync(ct);
 
-        var latestChecks = await (
-            from c in _db.Checks.AsNoTracking()
-            join lt in latestTsQuery
-                on new { c.TargetId, c.TimestampUtc }
-                equals new { lt.TargetId, TimestampUtc = lt.Ts }
-            select c
-        ).ToListAsync(ct);
+        // Pull checks for those latest timestamps (client-side match to avoid EF translation issues)
+        var latestChecks = await _db.Checks
+            .AsNoTracking()
+            .Where(c => targetIds.Contains(c.TargetId))
+            .ToListAsync(ct);
 
-        var checkMap = latestChecks.ToDictionary(c => c.TargetId);
+        var latestSet = new HashSet<(long TargetId, DateTime Ts)>(
+            latestTimes.Select(x => (x.TargetId, x.Ts)));
 
+        var checkMap = latestChecks
+            .Where(c => latestSet.Contains((c.TargetId, c.TimestampUtc)))
+            .GroupBy(c => c.TargetId)
+            .Select(g => g.OrderByDescending(x => x.TimestampUtc).First())
+            .ToDictionary(c => c.TargetId);
+
+        // Last check time across all targets (display TZ)
         var lastCheckUtc =
-            latestChecks.Count == 0
+            checkMap.Count == 0
+                ? (DateTime?)null
+                : checkMap.Values.Max(c => c.TimestampUtc);
+
+        var lastCheckLocal =
+            lastCheckUtc == null
                 ? ""
-                : latestChecks.Max(c => c.TimestampUtc).ToString("u");
+                : ToDisplayString(EnsureUtc(lastCheckUtc.Value), displayTz);
 
         var rows = new List<Row>(targets.Count);
 
@@ -137,7 +154,7 @@ public sealed class IndexModel : PageModel
             checkMap.TryGetValue(t.TargetId, out var chk);
 
             // Degraded rule:
-            // if currently UP, and login was ever detected, but not detected on last check => Degraded
+            // currently UP, login was seen before, but not seen on last check
             var degraded =
                 s != null &&
                 s.IsUp &&
@@ -153,19 +170,24 @@ public sealed class IndexModel : PageModel
             var durationSeconds =
                 s == null
                     ? "0"
-                    : ((long)Math.Max(0, (nowUtc - s.StateSinceUtc).TotalSeconds))
+                    : ((long)Math.Max(0, (nowUtc - EnsureUtc(s.StateSinceUtc)).TotalSeconds))
                         .ToString(CultureInfo.InvariantCulture);
 
-            var sinceUtc =
+            var sinceLocal =
                 s == null
                     ? ""
-                    : s.StateSinceUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+                    : ToDisplayString(EnsureUtc(s.StateSinceUtc), displayTz);
 
             var finalUrl = (s?.LastFinalUrl ?? chk?.FinalUrl ?? "").Trim();
 
-            // TCP column: OK/FAIL + (IP) if we have it
+            // TCP column
             var ip = (s?.LastUsedIp ?? chk?.UsedIp ?? "").Trim();
-            var tcpBase = chk == null ? "" : (chk.TcpOk ? "OK" : "FAIL");
+            var tcpBase =
+                chk != null ? (chk.TcpOk ? "OK" : "FAIL")
+                : (s?.LastSummary?.Contains("TCP OK", StringComparison.OrdinalIgnoreCase) == true ? "OK"
+                   : s?.LastSummary?.Contains("TCP FAIL", StringComparison.OrdinalIgnoreCase) == true ? "FAIL"
+                   : "");
+
             var tcpText =
                 string.IsNullOrWhiteSpace(tcpBase) ? ""
                 : string.IsNullOrWhiteSpace(ip) ? tcpBase
@@ -173,7 +195,7 @@ public sealed class IndexModel : PageModel
 
             var httpText = chk?.HttpStatusCode?.ToString(CultureInfo.InvariantCulture) ?? "";
 
-            // Check column: detected login type; default to Generic
+            // “Check” column (detected type; default Generic)
             var checkText = (s?.LastDetectedLoginType ?? chk?.DetectedLoginType ?? "").Trim();
             if (string.IsNullOrWhiteSpace(checkText))
                 checkText = "Generic";
@@ -186,11 +208,58 @@ public sealed class IndexModel : PageModel
                 httpText,
                 checkText,
                 stateText,
-                sinceUtc,
+                sinceLocal,
                 durationSeconds
             ));
         }
 
-        return (instance.DisplayName, lastCheckUtc, rows);
+        return (instance.DisplayName, lastCheckLocal, tzLabel, rows);
+    }
+
+    private static DateTime EnsureUtc(DateTime dt)
+        => dt.Kind == DateTimeKind.Utc ? dt : DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+
+    private static string ToDisplayString(DateTime utc, TimeZoneInfo tz)
+        => TimeZoneInfo.ConvertTimeFromUtc(utc, tz)
+            .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+    private static TimeZoneInfo ResolveDisplayTimeZone(string? instanceTimeZoneId, out string label)
+    {
+        // Default: server local
+        var serverLocal = TimeZoneInfo.Local;
+        label = "ServerLocal";
+
+        if (string.IsNullOrWhiteSpace(instanceTimeZoneId))
+            return serverLocal;
+
+        // Prefer to label what the instance is configured as
+        label = instanceTimeZoneId.Trim();
+
+        // 1) Try direct (works if it’s already a Windows ID)
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById(label);
+        }
+        catch
+        {
+            // ignore and try IANA->Windows
+        }
+
+        // 2) If it’s IANA (e.g., America/Phoenix), convert to Windows ID on Windows
+        if (TimeZoneInfo.TryConvertIanaIdToWindowsId(label, out var windowsId))
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(windowsId);
+            }
+            catch
+            {
+                // ignore and fall back
+            }
+        }
+
+        // Fallback: server local, but keep label clear
+        label = "ServerLocal";
+        return serverLocal;
     }
 }

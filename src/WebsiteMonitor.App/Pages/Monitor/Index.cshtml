@@ -1,72 +1,48 @@
 @page "/monitor/{instanceId}"
-@using System
 @model WebsiteMonitor.App.Pages.Monitor.IndexModel
 
-@{
-    var title = string.IsNullOrWhiteSpace(Model.DisplayName)
-        ? $"WebsiteMonitor - {Model.InstanceId}"
-        : $"WebsiteMonitor - {Model.DisplayName}";
-}
+<h1 class="wm-title">WebsiteMonitor - @Model.InstanceId</h1>
 
-<h1 class="wm-title">@title</h1>
+<p class="wm-meta">
+  Last Check (@Model.TimeZoneLabel):
+  <span id="wm-lastcheck">@Model.LastCheckLocal</span>
+</p>
 
-<div class="wm-meta">
-  <span>Last Check (UTC): </span><span id="wm-lastcheck">@Model.LastCheckUtc</span>
-  <span class="wm-meta-sep">|</span>
-  <span>InstanceId: @Model.InstanceId</span>
-</div>
-
-<div class="wm-nav">
+<p class="wm-nav">
   <a href="/setup/instances/@Model.InstanceId">Configure</a>
-  <span class="wm-nav-sep">|</span>
+  |
   <a href="/setup">Setup</a>
-  <span class="wm-nav-sep">|</span>
+  |
   <a href="/">Home</a>
-</div>
+</p>
 
 <style>
-  body { font-family: Calibri, "Segoe UI", Arial, sans-serif; }
-
-  .wm-title { margin: 6px 0 4px 0; font-size: 18px; font-weight: 600; }
-  .wm-meta { margin: 0 0 6px 0; font-size: 12px; opacity: 0.9; }
-  .wm-meta-sep { margin: 0 6px; opacity: 0.6; }
-
-  .wm-nav { margin: 0 0 10px 0; font-size: 12px; }
-  .wm-nav a { text-decoration: none; }
-  .wm-nav a:hover { text-decoration: underline; }
-  .wm-nav-sep { margin: 0 6px; opacity: 0.6; }
-
-  table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 6px; vertical-align: top; }
-  th { text-align: left; font-size: 12px; opacity: 0.9; }
-  td { font-size: 13px; }
-
   tr.wm-up { background-color: rgba(0, 180, 0, 0.15); }
   tr.wm-down { background-color: rgba(220, 0, 0, 0.14); }
   tr.wm-unknown { background-color: rgba(128, 128, 128, 0.14); }
   tr.wm-degraded { background-color: rgba(255, 215, 0, 0.14); }
 
-  .wm-site1 { font-size: 14px; line-height: 1.15; }
-  .wm-site2 { opacity: 0.75; font-size: 12px; margin-top: 2px; line-height: 1.15; }
+  .wm-title { margin: 0 0 2px 0; font-size: 1.15rem; font-weight: 600; }
+  .wm-meta { margin: 0 0 6px 0; font-size: 0.95rem; opacity: 0.9; }
+  .wm-nav { margin: 0 0 10px 0; font-size: 0.95rem; }
 
-  a.wm-link { color: inherit; text-decoration: none; }
-  a.wm-link:hover { text-decoration: underline; cursor: pointer; }
+  .wm-site1 { font-size: 1.02em; font-weight: 600; }
+  .wm-site1 a.wm-link { color: inherit; text-decoration: none; cursor: pointer; }
+  .wm-site1 a.wm-link:hover { text-decoration: underline; }
 
-  .wm-since1 { font-size: 13px; line-height: 1.15; }
-  .wm-since2 { opacity: 0.85; font-size: 12px; margin-top: 2px; line-height: 1.15; }
-
-  table, th, td { border: 1px solid rgba(255,255,255,0.15); }
+  .wm-site2 { opacity: 0.75; font-size: 0.9em; margin-top: 2px; }
+  .wm-since2 { opacity: 0.85; font-size: 0.9em; }
 </style>
 
-<table>
+<table border="1" cellpadding="6" cellspacing="0" style="width: 100%;">
   <thead>
     <tr>
-      <th style="width: 46%;">Site</th>
-      <th style="width: 9%;">TCP</th>
-      <th style="width: 7%;">HTTP</th>
-      <th style="width: 12%;">Check</th>
-      <th style="width: 10%;">State</th>
-      <th style="width: 16%;">Since (UTC)</th>
+      <th style="text-align:left;">Site</th>
+      <th>TCP</th>
+      <th>HTTP</th>
+      <th>Check</th>
+      <th>State</th>
+      <th style="text-align:left;">Since (@Model.TimeZoneLabel)</th>
     </tr>
   </thead>
   <tbody id="wm-body">
@@ -77,11 +53,8 @@
             : r.State.Equals("Degraded", StringComparison.OrdinalIgnoreCase) ? "wm-degraded"
             : "wm-unknown";
 
-    <tr class="@cls"
-        data-targetid="@r.TargetId"
-        data-state="@r.State"
-        data-baseduration="@r.DurationSeconds">
-      <td>
+    <tr class="@cls" data-targetid="@r.TargetId" data-state="@r.State" data-baseduration="@r.DurationSeconds">
+      <td style="text-align:left;">
         <div class="wm-site1">
           <a class="wm-link" href="@r.Url" target="_blank" rel="noopener noreferrer">@r.Url</a>
         </div>
@@ -91,8 +64,8 @@
       <td>@r.Http</td>
       <td>@r.Check</td>
       <td>@r.State</td>
-      <td>
-        <div class="wm-since1">@r.SinceUtc</div>
+      <td style="text-align:left;">
+        <div class="wm-since1">@r.SinceLocal</div>
         <div class="wm-since2"><span class="wm-age"></span></div>
       </td>
     </tr>
@@ -151,22 +124,13 @@
     });
   }
 
-  function escapeHtml(s) {
-    return String(s)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#39;");
-  }
-
   function renderRows(rows) {
     const body = document.getElementById("wm-body");
     if (!body) return;
 
     body.innerHTML = "";
 
-    for (const r of (rows || [])) {
+    for (const r of rows) {
       const tr = document.createElement("tr");
       tr.className = rowClass(r.state);
       tr.dataset.targetid = String(r.targetId);
@@ -174,12 +138,9 @@
       tr.dataset.baseduration = r.durationSeconds || "0";
 
       const tdSite = document.createElement("td");
+      tdSite.style.textAlign = "left";
       tdSite.innerHTML =
-        `<div class="wm-site1">` +
-          `<a class="wm-link" href="${escapeHtml(r.url || "")}" target="_blank" rel="noopener noreferrer">` +
-            `${escapeHtml(r.url || "")}` +
-          `</a>` +
-        `</div>` +
+        `<div class="wm-site1"><a class="wm-link" target="_blank" rel="noopener noreferrer" href="${escapeHtml(r.url || "")}">${escapeHtml(r.url || "")}</a></div>` +
         `<div class="wm-site2">${escapeHtml(r.finalUrl || "")}</div>`;
 
       const tdTcp = document.createElement("td");
@@ -195,8 +156,9 @@
       tdState.textContent = r.state || "";
 
       const tdSince = document.createElement("td");
+      tdSince.style.textAlign = "left";
       tdSince.innerHTML =
-        `<div class="wm-since1">${escapeHtml(r.sinceUtc || "")}</div>` +
+        `<div class="wm-since1">${escapeHtml(r.sinceLocal || "")}</div>` +
         `<div class="wm-since2"><span class="wm-age"></span></div>`;
 
       tr.appendChild(tdSite);
@@ -213,6 +175,15 @@
     updateAges();
   }
 
+  function escapeHtml(s) {
+    return String(s)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
   async function poll() {
     try {
       const url = `/monitor/${encodeURIComponent(instanceId)}?handler=Data`;
@@ -222,7 +193,7 @@
       const data = await resp.json();
 
       const lastCheck = document.getElementById("wm-lastcheck");
-      if (lastCheck) lastCheck.textContent = data.lastCheckUtc || "";
+      if (lastCheck) lastCheck.textContent = data.lastCheckLocal || "";
 
       renderRows(data.rows || []);
     } catch {
@@ -232,6 +203,5 @@
 
   setInterval(updateAges, 1000);
   setInterval(poll, pollMs);
-  updateAges();
 })();
 </script>
