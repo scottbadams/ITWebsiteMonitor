@@ -497,3 +497,15 @@ src/WebsiteMonitor.App/obj/
 runlog*.txt
 *.bak
 
+
+# local zips
+*.zip
+
+
+# generated snapshots
+src/WebsiteMonitor.App/Snapshots/AIS/
+# local zips
+*.zip
+
+# generated snapshots (if these are runtime output)
+src/WebsiteMonitor.App/Snapshots/AIS/
