@@ -1,0 +1,15 @@
+* text=auto
+
+# Source files should be LF in repo
+*.cs       text eol=lf
+*.cshtml   text eol=lf
+*.js       text eol=lf
+*.css      text eol=lf
+*.json     text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.md       text eol=lf
+
+# Git control files
+.gitignore     text eol=lf
+.gitattributes text eol=lf
