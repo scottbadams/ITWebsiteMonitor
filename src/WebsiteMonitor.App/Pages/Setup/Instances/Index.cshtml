@@ -3,7 +3,13 @@
 @attribute [Authorize(Roles = "Admin")]
 @model WebsiteMonitor.App.Pages.Setup.Instances.IndexModel
 
-<h1>Instance: @Model.InstanceId</h1>
+
+@{
+  var disp = string.IsNullOrWhiteSpace(Model.DisplayName) ? Model.InstanceId : Model.DisplayName;
+  ViewData["Title"] = $"Configure - {disp}";
+}
+
+<p class="wm-meta">Instance: <b>@Model.InstanceId</b></p>
 
 @if (!string.IsNullOrWhiteSpace(Model.Error))
 {

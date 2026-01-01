@@ -1,13 +1,16 @@
 @page "/setup/instances/notifications"
 @model WebsiteMonitor.App.Pages.Setup.Instances.NotificationsModel
 
-<h1>Notifications - @Model.InstanceId</h1>
+@{
+  ViewData["Title"] = $"Notifications - {Model.InstanceId}";
+}
 
-<p>
-  <a href="/setup">Back to Setup</a> |
-  <a href="/setup/instances/@Model.InstanceId/smtptest">SMTP Test</a> |
-  <a href="/setup/instances/@Model.InstanceId/webhooktest">Webhook Test</a>
-</p>
+@section PageActions {
+  <a class="wm-btn" href="/setup">Setup</a>
+  <a class="wm-btn" href="/setup/instances/@Model.InstanceId/smtptest">SMTP Test</a>
+  <a class="wm-btn" href="/setup/instances/@Model.InstanceId/webhooktest">Webhook Test</a>
+}
+
 
 @if (!string.IsNullOrWhiteSpace(Model.Info)) { <p style="color: green;">@Model.Info</p> }
 @if (!string.IsNullOrWhiteSpace(Model.Error)) { <p style="color: #b00;">@Model.Error</p> }

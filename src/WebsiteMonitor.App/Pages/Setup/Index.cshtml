@@ -1,60 +1,212 @@
 @page "/setup"
-@using Microsoft.AspNetCore.Authorization
-@attribute [Authorize(Roles = "Admin")]
 @model WebsiteMonitor.App.Pages.Setup.IndexModel
 
-<h1>Setup</h1>
-
-<p><a href="/setup/first-run">Create new instance</a></p>
-
-<table border="1" cellpadding="6" cellspacing="0">
-    <thead>
-        <tr>
-            <th>InstanceId</th>
-            <th>Name</th>
-            <th>Enabled</th>
-            <th>Runtime</th>
-            <th>Actions</th>
-            <th>Links</th>
-        </tr>
-    </thead>
-    <tbody>
-@foreach (var i in Model.Rows)
-{
-        <tr>
-            <td>@i.InstanceId</td>
-            <td>@i.DisplayName</td>
-            <td>@i.Enabled</td>
-            <td>@i.RuntimeState (@i.RuntimeChangedUtc.ToString("u"))</td>
-            <td>
-                <form method="post" asp-page-handler="Start" style="display:inline;">
-                    @Html.AntiForgeryToken()
-                    <input type="hidden" name="instanceId" value="@i.InstanceId" />
-                    <button type="submit">Start</button>
-                </form>
-
-                <form method="post" asp-page-handler="Stop" style="display:inline;">
-                    @Html.AntiForgeryToken()
-                    <input type="hidden" name="instanceId" value="@i.InstanceId" />
-                    <button type="submit">Stop</button>
-                </form>
-
-                <form method="post" asp-page-handler="Restart" style="display:inline;">
-                    @Html.AntiForgeryToken()
-                    <input type="hidden" name="instanceId" value="@i.InstanceId" />
-                    <button type="submit">Restart</button>
-                </form>
-            </td>
-			<td>
-				<a href="/setup/instances/@i.InstanceId">Configure</a>
-				|
-				<a href="/setup/instances/notifications?instanceId=@i.InstanceId">Notifications</a>
-				|
-				<a href="/monitor/@i.InstanceId">Monitor</a>
-				|
-				<a href="/setup/instances/webhook-test?instanceId=@i.InstanceId">Webhook Test</a>
-			</td>
-        </tr>
+@{
+  ViewData["Title"] = "Setup";
 }
-    </tbody>
+
+@section PageActions {
+  <a class="wm-btn" asp-page="./FirstRun">Create Instance</a>
+}
+
+<form id="wm-csrf-form" method="post" style="display:none;">
+  @Html.AntiForgeryToken()
+</form>
+
+<p class="wm-meta">Instances: <b>@Model.Rows.Count</b></p>
+
+<table class="wm-table" id="wm-setup-table">
+  <thead>
+    <tr>
+      <th class="wm-th-sortable wm-col-enabled" data-sort="enabled">Enabled<span class="wm-sort"></span></th>
+      <th class="wm-th-sortable" data-sort="instanceId">Instance<span class="wm-sort"></span></th>
+      <th class="wm-th-sortable" data-sort="displayName">Display Name<span class="wm-sort"></span></th>
+      <th class="wm-th-sortable" data-sort="runtimeState">Runtime<span class="wm-sort"></span></th>
+      <th class="wm-th-sortable" data-sort="runtimeChangedUtc">Runtime Since (UTC)<span class="wm-sort"></span></th>
+      <th class="wm-col-actions">Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+  @foreach (var r in Model.Rows)
+  {
+    <tr
+      class="@(r.Enabled ? "" : "wm-row-disabled")"
+      data-enabled="@(r.Enabled ? "1" : "0")"
+      data-instanceid="@r.InstanceId"
+      data-displayname="@r.DisplayName"
+      data-runtimestate="@r.RuntimeState"
+      data-runtimechangedutc="@r.RuntimeChangedUtc.ToString("o")">
+      <td class="wm-col-enabled">
+        <input
+          type="checkbox"
+          class="wm-inst-enabled"
+          data-instanceid="@r.InstanceId"
+          @(r.Enabled ? "checked" : "")
+          aria-label="Enable instance @r.InstanceId" />
+      </td>
+      <td>
+        <a href="/setup/instances/@r.InstanceId">@r.InstanceId</a>
+      </td>
+      <td>@r.DisplayName</td>
+      <td class="wm-runtimeState">@r.RuntimeState</td>
+      <td class="wm-runtimeChanged">@r.RuntimeChangedUtc.ToString("u")</td>
+      <td class="wm-cell-actions">
+        <form class="wm-actionform" method="post" asp-page-handler="Start">
+          @Html.AntiForgeryToken()
+          <input type="hidden" name="instanceId" value="@r.InstanceId" />
+          <button class="wm-btn" type="submit">Start</button>
+        </form>
+        <form class="wm-actionform" method="post" asp-page-handler="Stop">
+          @Html.AntiForgeryToken()
+          <input type="hidden" name="instanceId" value="@r.InstanceId" />
+          <button class="wm-btn" type="submit">Stop</button>
+        </form>
+        <form class="wm-actionform" method="post" asp-page-handler="Restart">
+          @Html.AntiForgeryToken()
+          <input type="hidden" name="instanceId" value="@r.InstanceId" />
+          <button class="wm-btn" type="submit">Restart</button>
+        </form>
+        <a class="wm-btn" href="/setup/instances/@r.InstanceId" target="_blank" rel="noopener noreferrer">Configure</a>
+      </td>
+    </tr>
+  }
+  </tbody>
 </table>
+
+@section Scripts {
+<script>
+(function(){
+  const table = document.getElementById('wm-setup-table');
+  if (!table) return;
+
+  const tbody = table.querySelector('tbody');
+  const headers = Array.from(table.querySelectorAll('th.wm-th-sortable'));
+  const csrf = document.querySelector('#wm-csrf-form input[name="__RequestVerificationToken"]')?.value || '';
+
+  let sortKey = 'instanceId';
+  let sortDir = 'asc';
+
+  try {
+    const saved = JSON.parse(localStorage.getItem('wm_setup_sort') || 'null');
+    if (saved && saved.key) { sortKey = saved.key; sortDir = saved.dir === 'desc' ? 'desc' : 'asc'; }
+  } catch {}
+
+  function getValue(tr, key){
+    if (key === 'enabled') return tr.getAttribute('data-enabled') || '0';
+    if (key === 'instanceId') return (tr.getAttribute('data-instanceid') || '').toLowerCase();
+    if (key === 'displayName') return (tr.getAttribute('data-displayname') || '').toLowerCase();
+    if (key === 'runtimeState') return (tr.getAttribute('data-runtimestate') || '').toLowerCase();
+    if (key === 'runtimeChangedUtc') return tr.getAttribute('data-runtimechangedutc') || '';
+    return '';
+  }
+
+  function compare(a, b){
+    const va = getValue(a, sortKey);
+    const vb = getValue(b, sortKey);
+
+    // enabled is numeric string
+    if (sortKey === 'enabled') {
+      const na = parseInt(va, 10) || 0;
+      const nb = parseInt(vb, 10) || 0;
+      return na - nb;
+    }
+
+    // dates in ISO sort lexicographically in UTC
+    if (sortKey === 'runtimeChangedUtc') {
+      if (va < vb) return -1;
+      if (va > vb) return 1;
+      return 0;
+    }
+
+    if (va < vb) return -1;
+    if (va > vb) return 1;
+    return 0;
+  }
+
+  function applySort(){
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort((a,b) => {
+      const c = compare(a,b);
+      return sortDir === 'asc' ? c : -c;
+    });
+    rows.forEach(r => tbody.appendChild(r));
+    setIndicators();
+    try { localStorage.setItem('wm_setup_sort', JSON.stringify({ key: sortKey, dir: sortDir })); } catch {}
+  }
+
+  function setIndicators(){
+    headers.forEach(h => {
+      const k = h.getAttribute('data-sort');
+      const sp = h.querySelector('.wm-sort');
+      if (!sp) return;
+      if (k === sortKey) sp.textContent = (sortDir === 'asc') ? '▲' : '▼';
+      else sp.textContent = '';
+    });
+  }
+
+  headers.forEach(h => {
+    h.addEventListener('click', () => {
+      const k = h.getAttribute('data-sort');
+      if (!k) return;
+      if (k === sortKey) sortDir = (sortDir === 'asc') ? 'desc' : 'asc';
+      else { sortKey = k; sortDir = 'asc'; }
+      applySort();
+    });
+  });
+
+  // Enable/disable checkbox -> AJAX toggle
+  table.addEventListener('change', async (e) => {
+    const cb = e.target;
+    if (!cb || !cb.classList || !cb.classList.contains('wm-inst-enabled')) return;
+
+    const instanceId = cb.getAttribute('data-instanceid') || '';
+    if (!instanceId) return;
+
+    const enabled = !!cb.checked;
+    cb.disabled = true;
+
+    try {
+      const res = await fetch('/setup?handler=ToggleEnabled', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'RequestVerificationToken': csrf
+        },
+        body: JSON.stringify({ instanceId, enabled })
+      });
+
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      if (!data || !data.ok) throw new Error((data && data.error) ? data.error : 'Unknown error');
+
+      const tr = cb.closest('tr');
+      if (tr) {
+        tr.setAttribute('data-enabled', data.enabled ? '1' : '0');
+        tr.classList.toggle('wm-row-disabled', !data.enabled);
+
+        if (typeof data.runtimeState === 'string') {
+          tr.setAttribute('data-runtimestate', data.runtimeState);
+          const cell = tr.querySelector('.wm-runtimeState');
+          if (cell) cell.textContent = data.runtimeState;
+        }
+        if (typeof data.runtimeChangedUtc === 'string') {
+          tr.setAttribute('data-runtimechangedutc', data.runtimeChangedUtc.replace(' ', 'T').replace('Z', 'Z'));
+          const cell = tr.querySelector('.wm-runtimeChanged');
+          if (cell) cell.textContent = data.runtimeChangedUtc;
+        }
+      }
+
+      applySort();
+    } catch (err) {
+      // revert checkbox UI if it failed
+      cb.checked = !enabled;
+      alert('Enable/Disable failed: ' + (err && err.message ? err.message : err));
+    } finally {
+      cb.disabled = false;
+    }
+  });
+
+  applySort();
+})();
+</script>
+}

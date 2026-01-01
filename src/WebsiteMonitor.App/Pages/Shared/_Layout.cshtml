@@ -1,14 +1,95 @@
-﻿<!doctype html>
+@using System
+@{
+  var appName = "ITWebsiteMonitor";
+
+  var path = Context?.Request?.Path.Value ?? "";
+  var isHome = string.IsNullOrEmpty(path) || string.Equals(path, "/", StringComparison.OrdinalIgnoreCase);
+  var isSetup = path.StartsWith("/setup", StringComparison.OrdinalIgnoreCase);
+
+  var embedParam = (Context?.Request?.Query["embed"].ToString() ?? "").Trim();
+  var isEmbed = string.Equals(embedParam, "1", StringComparison.OrdinalIgnoreCase)
+             || string.Equals(embedParam, "true", StringComparison.OrdinalIgnoreCase)
+             || string.Equals(embedParam, "yes", StringComparison.OrdinalIgnoreCase);
+
+  var isAuthed = User?.Identity?.IsAuthenticated ?? false;
+
+  // Page title suffix: prefer ViewData["Title"], else infer from path.
+  var titleSuffix = ((ViewData["Title"] as string) ?? "").Trim();
+
+  if (string.IsNullOrWhiteSpace(titleSuffix))
+  {
+    if (isHome) titleSuffix = "Home";
+    else if (path.StartsWith("/setup/instances", StringComparison.OrdinalIgnoreCase)) titleSuffix = "Configure";
+    else if (isSetup) titleSuffix = "Setup";
+    else if (path.StartsWith("/monitor", StringComparison.OrdinalIgnoreCase)) titleSuffix = "Monitor";
+    else if (path.StartsWith("/snapshots", StringComparison.OrdinalIgnoreCase)) titleSuffix = "Snapshots";
+    else titleSuffix = appName;
+  }
+  else if (isHome)
+  {
+    // Always show "Home" at /
+    titleSuffix = "Home";
+  }
+
+  var fullTitle = isEmbed
+    ? titleSuffix
+    : (titleSuffix.StartsWith(appName, StringComparison.OrdinalIgnoreCase) ? titleSuffix : ($"{appName} - {titleSuffix}"));
+}
+
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WebsiteMonitor</title>
+  <meta name="color-scheme" content="light dark" />
+
+  <title>@fullTitle</title>
 
   <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+
+  <style>
+    html, body { height: 100%; }
+    body { margin: 0; }
+
+    /* Global page padding */
+    .wm-page { padding: 15px; }
+
+    a { color: inherit; }
+  </style>
 </head>
 <body>
-  @RenderBody()
+  <div class="wm-page">
+    <div class="wm-topbar">
+      <h1 class="wm-topbar-title">@fullTitle</h1>
+      <div class="wm-topbar-actions">
+        @RenderSection("PageActions", required: false)
+
+        @if (!isEmbed)
+        {
+          @if (!isSetup)
+          {
+            <a class="wm-btn" href="/setup">Setup</a>
+          }
+
+          @if (!isHome)
+          {
+            <a class="wm-btn" href="/">Home</a>
+          }
+
+          @if (isAuthed)
+          {
+            <a class="wm-btn" href="/account/logout">Log Out</a>
+          }
+          else
+          {
+            <a class="wm-btn" href="/account/login">Login</a>
+          }
+        }
+      </div>
+    </div>
+
+    @RenderBody()
+  </div>
 
   @RenderSection("Scripts", required: false)
 </body>

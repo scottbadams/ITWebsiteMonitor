@@ -2,6 +2,7 @@ using System.Globalization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
+using WebsiteMonitor.Monitoring.Runtime;
 using WebsiteMonitor.Storage.Data;
 using WebsiteMonitor.Storage.Models;
 
@@ -10,8 +11,13 @@ namespace WebsiteMonitor.App.Pages.Monitor;
 public sealed class IndexModel : PageModel
 {
     private readonly WebsiteMonitorDbContext _db;
+    private readonly IInstanceRuntimeManager _runtime;
 
-    public IndexModel(WebsiteMonitorDbContext db) => _db = db;
+    public IndexModel(WebsiteMonitorDbContext db, IInstanceRuntimeManager runtime)
+    {
+        _db = db;
+        _runtime = runtime;
+    }
 
     [BindProperty(SupportsGet = true)]
     public string InstanceId { get; set; } = "";
@@ -20,6 +26,12 @@ public sealed class IndexModel : PageModel
     public string LastCheckLocal { get; private set; } = "";
     public string TimeZoneLabel { get; private set; } = "";
 
+    // Instance enabled/paused state for UI + polling
+    public bool InstanceEnabled { get; private set; } = true;
+    public bool IsPaused { get; private set; } = false;
+    public string RuntimeState { get; private set; } = "";
+    public DateTime RuntimeChangedUtc { get; private set; } = DateTime.UtcNow;
+
     public sealed record Row(
         long TargetId,
         string Url,
@@ -27,7 +39,7 @@ public sealed class IndexModel : PageModel
         string Tcp,
         string Http,
         string Check,
-        string State,          // Up / Down / Unknown / Degraded
+        string State,          // Up / Down / Unknown / Degraded / Paused
         string SinceLocal,     // display TZ
         string DurationSeconds // baseline for the JS timer
     );
@@ -42,12 +54,30 @@ public sealed class IndexModel : PageModel
         DisplayName = data.Value.displayName;
         LastCheckLocal = data.Value.lastCheckLocal;
         TimeZoneLabel = data.Value.timeZoneLabel;
+        InstanceEnabled = data.Value.instanceEnabled;
+        IsPaused = data.Value.isPaused;
+        RuntimeState = data.Value.runtimeState;
+        RuntimeChangedUtc = data.Value.runtimeChangedUtc;
         Rows = data.Value.rows;
 
         return Page();
     }
 
     // GET /monitor/{instanceId}?handler=Data
+    public async Task<IActionResult> OnPostStartAsync(CancellationToken ct)
+    {
+        await _runtime.StartAsync(InstanceId, ct);
+        var embed = (Request.Query["embed"].ToString() ?? "").Trim();
+        return RedirectToPage(new { instanceId = InstanceId, embed = string.IsNullOrWhiteSpace(embed) ? null : embed });
+    }
+
+    public async Task<IActionResult> OnPostStopAsync(CancellationToken ct)
+    {
+        await _runtime.StopAsync(InstanceId, ct);
+        var embed = (Request.Query["embed"].ToString() ?? "").Trim();
+        return RedirectToPage(new { instanceId = InstanceId, embed = string.IsNullOrWhiteSpace(embed) ? null : embed });
+    }
+
     public async Task<IActionResult> OnGetDataAsync(CancellationToken ct)
     {
         Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0";
@@ -62,6 +92,10 @@ public sealed class IndexModel : PageModel
             instanceId = InstanceId,
             displayName = data.Value.displayName,
             timeZoneLabel = data.Value.timeZoneLabel,
+            instanceEnabled = data.Value.instanceEnabled,
+            isPaused = data.Value.isPaused,
+            runtimeState = data.Value.runtimeState,
+            runtimeChangedUtc = data.Value.runtimeChangedUtc.ToString("o", CultureInfo.InvariantCulture),
             nowUtc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
             lastCheckLocal = data.Value.lastCheckLocal,
             rows = data.Value.rows.Select(r => new
@@ -79,7 +113,16 @@ public sealed class IndexModel : PageModel
         });
     }
 
-    private async Task<(string displayName, string lastCheckLocal, string timeZoneLabel, List<Row> rows)?> BuildDataAsync(CancellationToken ct)
+    private async Task<(
+        string displayName,
+        string lastCheckLocal,
+        string timeZoneLabel,
+        bool instanceEnabled,
+        bool isPaused,
+        string runtimeState,
+        DateTime runtimeChangedUtc,
+        List<Row> rows
+    )?> BuildDataAsync(CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(InstanceId))
             return null;
@@ -91,8 +134,17 @@ public sealed class IndexModel : PageModel
         if (instance == null)
             return null;
 
-        var displayTz = ResolveDisplayTimeZone(instance.TimeZoneId, out var tzLabel);
+        var instanceEnabled = instance.Enabled;
 
+        // Runtime status (in-memory pause/run state)
+        _runtime.TryGet(InstanceId, out var rt);
+        var runtimeState = rt.State.ToString();
+        var runtimeChangedUtc = rt.ChangedUtc;
+
+        // "Paused" on the monitor should reflect runtime pause OR disabled.
+        var isPaused = (!instanceEnabled) || rt.State == InstanceRunState.Paused;
+
+        var displayTz = ResolveDisplayTimeZone(instance.TimeZoneId, out var tzLabel);
         var nowUtc = DateTime.UtcNow;
 
         var targets = await _db.Targets
@@ -153,12 +205,15 @@ public sealed class IndexModel : PageModel
                 !s.LoginDetectedLast;
 
             var stateText =
+                isPaused ? "Paused" :
                 s == null ? "Unknown" :
                 !s.IsUp ? "Down" :
                 degraded ? "Degraded" :
                 "Up";
 
+            // If paused, freeze duration at 0 (UI can show "Paused" instead of ticking)
             var durationSeconds =
+                isPaused ? "0" :
                 s == null
                     ? "0"
                     : ((long)Math.Max(0, (nowUtc - EnsureUtc(s.StateSinceUtc)).TotalSeconds))
@@ -202,17 +257,15 @@ public sealed class IndexModel : PageModel
             ));
         }
 
-        return (instance.DisplayName, lastCheckLocal, tzLabel, rows);
+        return (instance.DisplayName, lastCheckLocal, tzLabel, instanceEnabled, isPaused, runtimeState, runtimeChangedUtc, rows);
     }
 
     private static DateTime EnsureUtc(DateTime dt)
         => dt.Kind == DateTimeKind.Utc ? dt : DateTime.SpecifyKind(dt, DateTimeKind.Utc);
 
-    // CHANGE HERE:
     // Desired display format:
     // - MM/DD/YYYY
     // - 12-hour clock with AM/PM
-    // If you truly want MM:DD:YYYY (with colons), change to: "MM':'dd':'yyyy h:mm tt"
     private const string DisplayDateTimeFormat = "MM/dd/yyyy h:mm:ss tt";
 
     private static string ToDisplayString(DateTime utc, TimeZoneInfo tz)

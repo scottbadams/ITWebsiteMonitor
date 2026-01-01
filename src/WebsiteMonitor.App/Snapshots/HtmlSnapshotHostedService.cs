@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Reflection;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
@@ -55,6 +57,7 @@ public sealed class HtmlSnapshotHostedService : BackgroundService
         var db = scope.ServiceProvider.GetRequiredService<WebsiteMonitorDbContext>();
 
         var instances = await db.Instances
+            .AsNoTracking()
             .Where(i => i.Enabled && i.WriteHtmlSnapshot && i.OutputFolder != null && i.OutputFolder != "")
             .ToListAsync(ct);
 
@@ -66,6 +69,7 @@ public sealed class HtmlSnapshotHostedService : BackgroundService
                     db,
                     inst.InstanceId,
                     inst.DisplayName,
+                    inst.TimeZoneId,
                     inst.OutputFolder!,
                     ct);
             }
@@ -80,6 +84,7 @@ public sealed class HtmlSnapshotHostedService : BackgroundService
         WebsiteMonitorDbContext db,
         string instanceId,
         string displayName,
+        string? timeZoneId,
         string outputFolderRaw,
         CancellationToken ct)
     {
@@ -90,7 +95,15 @@ public sealed class HtmlSnapshotHostedService : BackgroundService
 
         Directory.CreateDirectory(outputFolder);
 
+        // Per-target snapshots live under {outputFolder}\targets\{TargetId}.html
+        var targetsFolder = Path.Combine(outputFolder, "targets");
+        Directory.CreateDirectory(targetsFolder);
+
+        var tz = ResolveTimeZone(timeZoneId, _logger);
+        var tzLabel = string.IsNullOrWhiteSpace(timeZoneId) ? TimeZoneInfo.Local.Id : timeZoneId!.Trim();
+
         var targets = await db.Targets
+            .AsNoTracking()
             .Where(t => t.InstanceId == instanceId && t.Enabled)
             .OrderBy(t => t.Url)
             .ToListAsync(ct);
@@ -101,6 +114,7 @@ public sealed class HtmlSnapshotHostedService : BackgroundService
         var targetIds = targets.Select(t => t.TargetId).ToList();
 
         var states = await db.States
+            .AsNoTracking()
             .Where(s => targetIds.Contains(s.TargetId))
             .ToDictionaryAsync(s => s.TargetId, ct);
 
@@ -109,6 +123,7 @@ public sealed class HtmlSnapshotHostedService : BackgroundService
         var maxChecks = perTargetN * targets.Count;
 
         var recentChecks = await db.Checks
+            .AsNoTracking()
             .Where(c => targetIds.Contains(c.TargetId))
             .OrderByDescending(c => c.TimestampUtc)
             .Take(maxChecks)
@@ -123,99 +138,268 @@ public sealed class HtmlSnapshotHostedService : BackgroundService
 
         var nowUtc = DateTime.UtcNow;
 
+        // -------------------------
+        // Write per-instance snapshot
+        // -------------------------
         var sb = new StringBuilder();
         sb.AppendLine("<!doctype html>");
-        sb.AppendLine("<html><head><meta charset=\"utf-8\"/>");
-        sb.AppendLine($"<title>WebsiteMonitor - {Html(displayName)} ({Html(instanceId)})</title>");
-        sb.AppendLine("<style>");
-        sb.AppendLine("body{font-family:Segoe UI,Arial,sans-serif;margin:16px;background:#111;color:#eee;}");
-        sb.AppendLine("h1{margin:0 0 6px 0;font-size:20px;}");
-        sb.AppendLine(".meta{color:#bbb;margin:0 0 12px 0;font-size:12px;}");
-        sb.AppendLine("table{border-collapse:collapse;width:100%;}");
-        sb.AppendLine("th,td{border:1px solid #333;padding:8px;vertical-align:top;}");
-        sb.AppendLine("th{background:#1b1b1b;text-align:left;}");
-        sb.AppendLine(".up{background:#0f2a16;}");
-        sb.AppendLine(".down{background:#2a0f0f;}");
-        sb.AppendLine(".unknown{background:#1a1a1a;}");
-        sb.AppendLine(".url2{color:#aaa;font-size:12px;margin-top:4px;}");
-        sb.AppendLine(".hist{margin-top:6px;font-size:12px;color:#ddd;}");
-        sb.AppendLine(".hist table{width:100%;}");
-        sb.AppendLine(".hist th,.hist td{padding:4px 6px;}");
-        sb.AppendLine("</style></head><body>");
+sb.AppendLine("<html lang=\"en\"><head>");
+sb.AppendLine("<meta charset=\"utf-8\"/>");
+sb.AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"/>");
+sb.AppendLine("<meta name=\"color-scheme\" content=\"light dark\"/>");
+sb.AppendLine($"<title>ITWebsiteMonitor - Snapshot - {Html(displayName)}</title>");
+sb.AppendLine("<link rel=\"stylesheet\" href=\"/css/site.css\" />");
+sb.AppendLine("</head><body>");
 
-        sb.AppendLine($"<h1>WebsiteMonitor - {Html(displayName)} ({Html(instanceId)})</h1>");
-        sb.Append("<div class=\"meta\">");
-        sb.Append($"Generated (UTC): {nowUtc:u}");
-        if (lastRunUtc != null)
-            sb.Append($" &nbsp;|&nbsp; Last Run (UTC): {lastRunUtc.Value:u}");
-        sb.AppendLine("</div>");
+sb.AppendLine("<div class=\"wm-page\">");
+sb.AppendLine("<div class=\"wm-topbar\">");
+sb.AppendLine($"<h1 class=\"wm-topbar-title\">ITWebsiteMonitor - Snapshot - {Html(displayName)}</h1>");
+sb.AppendLine("<div class=\"wm-topbar-actions\">");
+sb.AppendLine("<a class=\"wm-btn\" href=\"/\">Home</a>");
+sb.AppendLine($"<a class=\"wm-btn\" href=\"/monitor/{HtmlAttr(instanceId)}\">Monitor</a>");
+sb.AppendLine("<a class=\"wm-btn\" href=\"/setup\">Setup</a>");
+sb.AppendLine("<a class=\"wm-btn\" href=\"/account/logout\" target=\"_top\" rel=\"noopener noreferrer\">Log Out</a>");
+sb.AppendLine("</div></div>");
 
-        sb.AppendLine("<table>");
+sb.AppendLine("<p class=\"wm-meta\">");
+sb.Append($"Generated ({Html(tzLabel)}): {Html(FmtLocal(nowUtc, tz))}");
+if (lastRunUtc != null)
+    sb.Append($" &nbsp;|&nbsp; Last Run ({Html(tzLabel)}): {Html(FmtLocal(lastRunUtc.Value, tz))}");
+sb.AppendLine("</p>");
+
+        sb.AppendLine("<table class=\"wm-table\">");
         sb.AppendLine("<thead><tr>");
-        sb.AppendLine("<th>Site</th><th>State</th><th>Since (UTC)</th><th>Last Check (UTC)</th><th>Last Summary</th>");
+        sb.AppendLine($"<th>Site</th><th>State</th><th>Since ({Html(tzLabel)})</th><th>Last Check ({Html(tzLabel)})</th><th>Last Summary</th>");
         sb.AppendLine("</tr></thead><tbody>");
 
         foreach (var t in targets)
         {
             states.TryGetValue(t.TargetId, out var st);
 
+            recentByTarget.TryGetValue(t.TargetId, out var histList);
+            var latestChk = (histList != null && histList.Count > 0) ? histList[0] : null;
+
             var stateText = "Unknown";
-            var css = "unknown";
+            var css = "wm-unknown";
+
             DateTime? sinceUtc = null;
             DateTime? lastCheckUtc = null;
             var lastSummary = "";
 
             if (st != null)
             {
-                stateText = st.IsUp ? "Up" : "Down";
-                css = st.IsUp ? "up" : "down";
+                // Same degraded rule as monitor page:
+                var degraded = st.IsUp && st.LoginDetectedEver && !st.LoginDetectedLast;
+
+                stateText = st.IsUp ? (degraded ? "Degraded" : "Up") : "Down";
+                css = st.IsUp ? (degraded ? "wm-degraded" : "wm-up") : "wm-down";
+
                 sinceUtc = st.StateSinceUtc;
                 lastCheckUtc = st.LastCheckUtc;
                 lastSummary = st.LastSummary ?? "";
             }
+            else if (latestChk != null)
+            {
+                // Fallback if state row doesn’t exist yet
+                lastCheckUtc = latestChk.TimestampUtc;
+                lastSummary = latestChk.Summary ?? "";
+            }
+
+            var finalUrl = (st?.LastFinalUrl ?? latestChk?.FinalUrl ?? "").Trim();
+
+            // In the per-instance snapshot: Site (line 1) links to the per-target snapshot file
+            var perTargetRel = $"targets/{t.TargetId}.html";
 
             sb.AppendLine($"<tr class=\"{css}\">");
             sb.AppendLine("<td>");
-            sb.AppendLine($"<div>{Html(t.Url)}</div>");
-            // Final URL after redirects is a Step 9 enhancement; leave blank in Step 8.
-            sb.AppendLine("<div class=\"url2\"></div>");
+            sb.AppendLine($"<div class=\"wm-site1\"><a class=\"wm-siteLink\" href=\"{HtmlAttr(perTargetRel)}\">{Html(t.Url)}</a></div>");
+            var finalUrlHtml = string.IsNullOrWhiteSpace(finalUrl) ? "" : $"<a class=\"wm-finalLink\" href=\"{HtmlAttr(finalUrl)}\" target=\"_blank\" rel=\"noopener noreferrer\">{Html(finalUrl)}</a>";
+            sb.AppendLine($"<div class=\"wm-site2\">{finalUrlHtml}</div>");
             sb.AppendLine("</td>");
 
             sb.AppendLine($"<td>{Html(stateText)}</td>");
-            sb.AppendLine($"<td>{(sinceUtc == null ? "" : sinceUtc.Value.ToString("u"))}</td>");
-            sb.AppendLine($"<td>{(lastCheckUtc == null ? "" : lastCheckUtc.Value.ToString("u"))}</td>");
+            sb.AppendLine($"<td>{(sinceUtc == null ? "" : Html(FmtLocal(sinceUtc.Value, tz)))}</td>");
+            sb.AppendLine($"<td>{(lastCheckUtc == null ? "" : Html(FmtLocal(lastCheckUtc.Value, tz)))}</td>");
             sb.AppendLine($"<td>{Html(lastSummary)}</td>");
             sb.AppendLine("</tr>");
 
-            if (recentByTarget.TryGetValue(t.TargetId, out var hist) && hist.Count > 0)
-            {
-                sb.AppendLine("<tr><td colspan=\"5\">");
-                sb.AppendLine("<div class=\"hist\"><strong>Recent checks</strong>");
-                sb.AppendLine("<table><thead><tr><th>UTC</th><th>Summary</th></tr></thead><tbody>");
+            // Also (re)write the per-target snapshot file each tick
+            var perTargetPath = Path.Combine(targetsFolder, $"{t.TargetId}.html");
+            var perTargetHtml = BuildPerTargetHtml(
+                displayName,
+                instanceId,
+                tzLabel,
+                tz,
+                t.Url,
+                finalUrl,
+                stateText,
+                sinceUtc,
+                lastCheckUtc,
+                lastSummary,
+                histList);
 
-                foreach (var c in hist)
-                {
-                    sb.AppendLine("<tr>");
-                    sb.AppendLine($"<td>{c.TimestampUtc:u}</td>");
-                    sb.AppendLine($"<td>{Html(c.Summary ?? "")}</td>");
-                    sb.AppendLine("</tr>");
-                }
-
-                sb.AppendLine("</tbody></table></div>");
-                sb.AppendLine("</td></tr>");
-            }
+            await AtomicWriteUtf8Async(perTargetPath, perTargetHtml, ct);
         }
 
         sb.AppendLine("</tbody></table>");
-        sb.AppendLine("</body></html>");
+        sb.AppendLine("</div></body></html>");
 
         var finalPath = Path.Combine(outputFolder, $"{instanceId}.html");
-        var tmpPath = finalPath + ".tmp";
+        await AtomicWriteUtf8Async(finalPath, sb.ToString(), ct);
+    }
 
-        await File.WriteAllTextAsync(tmpPath, sb.ToString(), Encoding.UTF8, ct);
+    private static string BuildPerTargetHtml(
+        string displayName,
+        string instanceId,
+        string tzLabel,
+        TimeZoneInfo tz,
+        string url,
+        string finalUrl,
+        string stateText,
+        DateTime? sinceUtc,
+        DateTime? lastCheckUtc,
+        string lastSummary,
+        List<WebsiteMonitor.Storage.Models.Check>? histList)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("<!doctype html>");
+sb.AppendLine("<html lang=\"en\"><head>");
+sb.AppendLine("<meta charset=\"utf-8\"/>");
+sb.AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"/>");
+sb.AppendLine("<meta name=\"color-scheme\" content=\"light dark\"/>");
+sb.AppendLine($"<title>ITWebsiteMonitor - Snapshot - {Html(displayName)}</title>");
+sb.AppendLine("<link rel=\"stylesheet\" href=\"/css/site.css\" />");
+sb.AppendLine("</head><body>");
+
+sb.AppendLine("<div class=\"wm-page\">");
+sb.AppendLine("<div class=\"wm-topbar\">");
+sb.AppendLine($"<h1 class=\"wm-topbar-title\">ITWebsiteMonitor - Snapshot - {Html(displayName)}</h1>");
+sb.AppendLine("<div class=\"wm-topbar-actions\">");
+sb.AppendLine("<a class=\"wm-btn\" href=\"/\">Home</a>");
+sb.AppendLine($"<a class=\"wm-btn\" href=\"/monitor/{HtmlAttr(instanceId)}\">Monitor</a>");
+sb.AppendLine("<a class=\"wm-btn\" href=\"/setup\">Setup</a>");
+sb.AppendLine("<a class=\"wm-btn\" href=\"/account/logout\" target=\"_top\" rel=\"noopener noreferrer\">Log Out</a>");
+sb.AppendLine("</div></div>");
+
+sb.AppendLine($"<p class=\"wm-meta\">{Html(url)}</p>");
+if (!string.IsNullOrWhiteSpace(finalUrl))
+    sb.AppendLine($"<p class=\"wm-meta\"><a class=\"wm-finalLink\" href=\"{HtmlAttr(finalUrl)}\" target=\"_blank\" rel=\"noopener noreferrer\">{Html(finalUrl)}</a></p>");
+
+sb.AppendLine("<table class=\"wm-table\">");
+        sb.AppendLine("<thead><tr>");
+        sb.AppendLine($"<th>State</th><th>Since ({Html(tzLabel)})</th><th>Last Check ({Html(tzLabel)})</th><th>Last Summary</th>");
+        sb.AppendLine("</tr></thead><tbody>");
+
+        var rowClass = "wm-unknown";
+if (!string.IsNullOrWhiteSpace(stateText))
+{
+    var stLower = stateText.Trim().ToLowerInvariant();
+    if (stLower.Contains("paused")) rowClass = "wm-paused";
+    else if (stLower.Contains("degraded")) rowClass = "wm-degraded";
+    else if (stLower.Contains("down")) rowClass = "wm-down";
+    else if (stLower.Contains("up")) rowClass = "wm-up";
+}
+
+sb.AppendLine($"<tr class=\"{rowClass}\">");
+        sb.AppendLine($"<td>{Html(stateText)}</td>");
+        sb.AppendLine($"<td>{(sinceUtc == null ? "" : Html(FmtLocal(sinceUtc.Value, tz)))}</td>");
+        sb.AppendLine($"<td>{(lastCheckUtc == null ? "" : Html(FmtLocal(lastCheckUtc.Value, tz)))}</td>");
+        sb.AppendLine($"<td>{Html(lastSummary)}</td>");
+        sb.AppendLine("</tr>");
+
+        sb.AppendLine("</tbody></table>");
+
+        if (histList != null && histList.Count > 0)
+        {
+            sb.AppendLine("<div class=\"hist\"><strong>Recent checks</strong>");
+            sb.AppendLine($"<table><thead><tr><th>{Html(tzLabel)}</th><th>Summary</th></tr></thead><tbody>");
+
+            foreach (var c in histList)
+            {
+                sb.AppendLine("<tr>");
+                sb.AppendLine($"<td>{Html(FmtLocal(c.TimestampUtc, tz))}</td>");
+                sb.AppendLine($"<td>{Html(c.Summary ?? "")}</td>");
+                sb.AppendLine("</tr>");
+            }
+
+            sb.AppendLine("</tbody></table></div>");
+        }
+
+        sb.AppendLine("</div></body></html>");
+        return sb.ToString();
+    }
+
+    private static async Task AtomicWriteUtf8Async(string finalPath, string content, CancellationToken ct)
+    {
+        var dir = Path.GetDirectoryName(finalPath);
+        if (!string.IsNullOrWhiteSpace(dir))
+            Directory.CreateDirectory(dir);
+
+        var tmpPath = finalPath + ".tmp";
+        await File.WriteAllTextAsync(tmpPath, content, Encoding.UTF8, ct);
         File.Move(tmpPath, finalPath, true);
     }
 
-    private static string Html(string s)
+    private const string SnapshotDateTimeFormat = "MM/dd/yyyy h:mm:ss tt";
+
+    private static string FmtLocal(DateTime utc, TimeZoneInfo tz)
+    {
+        // SQLite/EF often comes back as Kind=Unspecified; force UTC semantics
+        var asUtc = utc.Kind == DateTimeKind.Utc ? utc : DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+        var local = TimeZoneInfo.ConvertTimeFromUtc(asUtc, tz);
+        return local.ToString(SnapshotDateTimeFormat, CultureInfo.InvariantCulture);
+    }
+
+    private static TimeZoneInfo ResolveTimeZone(string? timeZoneId, ILogger logger)
+    {
+        if (string.IsNullOrWhiteSpace(timeZoneId))
+            return TimeZoneInfo.Local;
+
+        var id = timeZoneId.Trim();
+
+        // 1) Direct (works on Linux for IANA; on Windows for Windows IDs)
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById(id);
+        }
+        catch
+        {
+            // ignore and try TZConvert
+        }
+
+        // 2) Try TimeZoneConverter if present (reflection; no hard dependency)
+        try
+        {
+            var t = Type.GetType("TimeZoneConverter.TZConvert, TimeZoneConverter", false);
+            if (t != null)
+            {
+                var mi = t.GetMethod(
+                    "GetTimeZoneInfo",
+                    BindingFlags.Public | BindingFlags.Static,
+                    null,
+                    new[] { typeof(string) },
+                    null);
+
+                if (mi != null)
+                {
+                    var tz = mi.Invoke(null, new object?[] { id }) as TimeZoneInfo;
+                    if (tz != null)
+                        return tz;
+                }
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        logger.LogWarning("Could not resolve TimeZoneId='{TimeZoneId}'. Falling back to Local.", id);
+        return TimeZoneInfo.Local;
+    }
+
+    private static string Html(string? s)
+        => System.Net.WebUtility.HtmlEncode(s ?? "");
+
+    private static string HtmlAttr(string? s)
         => System.Net.WebUtility.HtmlEncode(s ?? "");
 }

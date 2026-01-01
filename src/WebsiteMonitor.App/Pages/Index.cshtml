@@ -1,23 +1,111 @@
 @page
 @using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using WebsiteMonitor.Storage.Data
 @using WebsiteMonitor.Storage.Identity
 @inject SignInManager<ApplicationUser> SignInManager
+@inject WebsiteMonitorDbContext Db
 
-<h1>ITWebsiteMonitor</h1>
+@{
+  ViewData["Title"] = "Home";
+}
 
 @if (SignInManager.IsSignedIn(User))
 {
-    <p>Signed in as: <b>@User.Identity?.Name</b></p>
-    <ul>
-        <li><a href="/setup">Setup</a></li>
-        <li><a href="/account/logout">Logout</a></li>
-    </ul>
+  <p class="wm-meta">Signed in as: <b>@User.Identity?.Name</b></p>
+
+  var instances = await Db.Instances.AsNoTracking()
+    .OrderBy(i => i.DisplayName)
+    .ThenBy(i => i.InstanceId)
+    .ToListAsync();
+
+  if (instances.Count == 0)
+  {
+    <p>No instances found.</p>
+  }
+  else
+  {
+    <div class="wm-tabs" id="wm-home-tabs">
+      <div class="wm-tablist" role="tablist" aria-label="Instance Monitors">
+        @for (var i = 0; i < instances.Count; i++)
+        {
+          var inst = instances[i];
+          var tabId = $"tab-{inst.InstanceId}";
+          var panelId = $"panel-{inst.InstanceId}";
+          var label = inst.DisplayName + (inst.Enabled ? "" : " (Disabled)");
+          <button
+            class="wm-tab"
+            type="button"
+            role="tab"
+            id="@tabId"
+            aria-controls="@panelId"
+            aria-selected="@(i == 0 ? "true" : "false")"
+            tabindex="@(i == 0 ? "0" : "-1")"
+            data-target="@panelId">
+            <span class="wm-btn">@label</span>
+          </button>
+        }
+      </div>
+
+      @for (var i = 0; i < instances.Count; i++)
+      {
+        var inst = instances[i];
+        var panelId = $"panel-{inst.InstanceId}";
+        <div
+          class="wm-tabpanel"
+          id="@panelId"
+          role="tabpanel"
+          aria-labelledby="tab-@inst.InstanceId"
+          style="display:@(i == 0 ? "block" : "none")">
+          <iframe class="wm-iframe" src="/monitor/@inst.InstanceId?embed=1"></iframe>
+        </div>
+      }
+    </div>
+
+    <script>
+      (function () {
+        const root = document.getElementById('wm-home-tabs');
+        if (!root) return;
+
+        const tabs = Array.from(root.querySelectorAll('[role="tab"]'));
+        const panels = Array.from(root.querySelectorAll('[role="tabpanel"]'));
+
+        function activate(tab) {
+          const targetId = tab.getAttribute('data-target');
+          tabs.forEach(t => {
+            const on = (t === tab);
+            t.setAttribute('aria-selected', on ? 'true' : 'false');
+            t.tabIndex = on ? 0 : -1;
+          });
+          panels.forEach(p => {
+            p.style.display = (p.id === targetId) ? 'block' : 'none';
+          });
+        }
+
+        tabs.forEach(t => t.addEventListener('click', () => activate(t)));
+
+        root.addEventListener('keydown', (e) => {
+          const k = e.key;
+          if (k !== 'ArrowLeft' && k !== 'ArrowRight' && k !== 'Home' && k !== 'End') return;
+          const i = tabs.findIndex(t => t.getAttribute('aria-selected') === 'true');
+          let next = i;
+          if (k === 'ArrowLeft') next = Math.max(0, i - 1);
+          if (k === 'ArrowRight') next = Math.min(tabs.length - 1, i + 1);
+          if (k === 'Home') next = 0;
+          if (k === 'End') next = tabs.length - 1;
+          e.preventDefault();
+          tabs[next].focus();
+          activate(tabs[next]);
+        });
+      })();
+    </script>
+  }
 }
 else
 {
-    <p>Not signed in.</p>
-    <ul>
-        <li><a href="/bootstrap">Bootstrap (first admin)</a></li>
-        <li><a href="/account/login">Login</a></li>
-    </ul>
+  <p>Not signed in.</p>
+  <ul>
+    <li><a href="/bootstrap">Bootstrap (first admin)</a></li>
+    <li><a href="/account/login">Login</a></li>
+  </ul>
 }

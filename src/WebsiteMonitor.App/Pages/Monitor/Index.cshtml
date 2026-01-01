@@ -1,90 +1,221 @@
 @page "/monitor/{instanceId}"
 @model WebsiteMonitor.App.Pages.Monitor.IndexModel
 
-<h1 class="wm-title">WebsiteMonitor - @Model.InstanceId</h1>
+@functions {
+    private static object? GetProp(object? obj, params string[] names)
+    {
+        if (obj == null) return null;
 
-<p class="wm-meta">
-  Last Check (@Model.TimeZoneLabel):
-  <span id="wm-lastcheck">@Model.LastCheckLocal</span>
-</p>
+        var t = obj.GetType();
+        foreach (var n in names)
+        {
+            try
+            {
+                var p = t.GetProperty(n, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
+                if (p != null) return p.GetValue(obj);
+            }
+            catch { /* ignore */ }
+        }
+        return null;
+    }
 
-<p class="wm-nav">
-  <a href="/setup/instances/@Model.InstanceId">Configure</a>
-  |
-  <a href="/setup">Setup</a>
-  |
-  <a href="/">Home</a>
-</p>
+    private static string GetStr(object? obj, params string[] names)
+        => (GetProp(obj, names) as string) ?? "";
 
-<style>
-  tr.wm-up { background-color: rgba(0, 180, 0, 0.15); }
-  tr.wm-down { background-color: rgba(220, 0, 0, 0.14); }
-  tr.wm-unknown { background-color: rgba(128, 128, 128, 0.14); }
-  tr.wm-degraded { background-color: rgba(255, 215, 0, 0.14); }
+    private static long GetLong(object? obj, params string[] names)
+    {
+        var v = GetProp(obj, names);
+        if (v is long l) return l;
+        if (v is int i) return i;
+        if (v is string s && long.TryParse(s, out var x)) return x;
+        return 0;
+    }
 
-  .wm-title { margin: 0 0 2px 0; font-size: 1.15rem; font-weight: 600; }
-  .wm-meta { margin: 0 0 6px 0; font-size: 0.95rem; opacity: 0.9; }
-  .wm-nav { margin: 0 0 10px 0; font-size: 0.95rem; }
+    private static bool GetBool(object? obj, params string[] names)
+    {
+        var v = GetProp(obj, names);
+        if (v is bool b) return b;
+        if (v is int i) return i != 0;
+        if (v is long l) return l != 0;
+        if (v is string s && bool.TryParse(s, out var x)) return x;
+        return false;
+    }
+}
 
-  .wm-site1 { font-size: 1.02em; font-weight: 600; }
-  .wm-site1 a.wm-link { color: inherit; text-decoration: none; cursor: pointer; }
-  .wm-site1 a.wm-link:hover { text-decoration: underline; }
+@{
+    // CHANGE THIS IF YOUR SNAPSHOT ROUTE IS DIFFERENT
+    // Expected format used below:  {snapshotBasePath}/{instanceId}/{targetId}
+    var snapshotBasePath = "/snapshots";
 
-  .wm-site2 { opacity: 0.75; font-size: 0.9em; margin-top: 2px; }
-  .wm-since2 { opacity: 0.85; font-size: 0.9em; }
-</style>
+    var embedParam = (ViewContext?.HttpContext?.Request?.Query["embed"].ToString() ?? "").Trim();
+    var isEmbed = string.Equals(embedParam, "1", StringComparison.OrdinalIgnoreCase)
+              || string.Equals(embedParam, "true", StringComparison.OrdinalIgnoreCase)
+              || string.Equals(embedParam, "yes", StringComparison.OrdinalIgnoreCase);
 
-<table border="1" cellpadding="6" cellspacing="0" style="width: 100%;">
-  <thead>
-    <tr>
-      <th style="text-align:left;">Site</th>
-      <th>TCP</th>
-      <th>HTTP</th>
-      <th>Check</th>
-      <th>State</th>
-      <th style="text-align:left;">Since (@Model.TimeZoneLabel)</th>
-    </tr>
-  </thead>
-  <tbody id="wm-body">
-@foreach (var r in Model.Rows)
+    var tzLabel = GetStr(Model, "TimeZoneLabel", "TimeZoneId");
+    if (string.IsNullOrWhiteSpace(tzLabel))
+        tzLabel = System.TimeZoneInfo.Local.Id;
+
+    var displayName = GetStr(Model, "DisplayName");
+
+    var titleText = string.IsNullOrWhiteSpace(displayName) ? Model.InstanceId : displayName;
+
+    var lastCheckText =
+        GetStr(Model, "LastCheckLocal", "LastCheck", "LastCheckUtc");
+
+    var isPaused = GetBool(Model, "IsPaused", "isPaused");
+    var lastCheckDisplay = isPaused
+        ? (string.IsNullOrWhiteSpace(lastCheckText) ? "(Paused)" : (lastCheckText + " (Paused)"))
+        : lastCheckText;
+
+    ViewData["Title"] = titleText;
+}
+
+@section PageActions {
+  <a class="wm-btn" href="/setup/instances/@Model.InstanceId" target="_blank" rel="noopener noreferrer">Configure</a>
+  @if (isEmbed)
+  {
+    <form class="wm-actionform" method="post" asp-page-handler="Stop" asp-route-instanceId="@Model.InstanceId" asp-route-embed="1">
+      <button class="wm-btn" type="submit">Stop</button>
+    </form>
+    <form class="wm-actionform" method="post" asp-page-handler="Start" asp-route-instanceId="@Model.InstanceId" asp-route-embed="1">
+      <button class="wm-btn" type="submit">Start</button>
+    </form>
+  }
+}
+
+
+<div class="wm-container">
+  <div class="wm-bar">
+    <div class="wm-meta">
+      <span class="wm-metaLabel">Last Check (@tzLabel):</span>
+      <span id="wm-lastcheck" class="wm-metaValue">@lastCheckDisplay</span>
+    </div>
+  </div>
+
+  <style>
+    .wm-container { padding: 10px 10px; }
+    .wm-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 10px 0; flex-wrap: wrap; }
+
+    .wm-meta { font-size: 12px; opacity: 0.92; }
+    .wm-metaLabel { opacity: 0.85; }
+    .wm-metaValue { font-weight: 600; }
+
+
+    tr.wm-up { background-color: rgba(0, 180, 0, 0.15); }
+    tr.wm-down { background-color: rgba(220, 0, 0, 0.14); }
+    tr.wm-unknown { background-color: rgba(128, 128, 128, 0.14); }
+    tr.wm-degraded { background-color: rgba(255, 215, 0, 0.14); }
+
+    tr.wm-paused { background-color: rgba(255, 215, 0, 0.28); }
+
+    .wm-site1 { font-size: 1.02em; }
+    .wm-site2 { opacity: 0.75; font-size: 0.9em; margin-top: 2px; }
+    .wm-since2 { opacity: 0.85; font-size: 0.9em; }
+
+    .wm-siteLink, .wm-finalLink { color: inherit; text-decoration: none; }
+    .wm-siteLink:hover, .wm-finalLink:hover { text-decoration: underline; cursor: pointer; }
+
+    /* Sorting */
+    th.wm-sortable { cursor: pointer; user-select: none; }
+    th.wm-sortable:hover { text-decoration: underline; }
+    .wm-sort-ind { opacity: 0.75; margin-left: 6px; font-size: 11px; }
+  </style>
+
+  <table id="wm-table" border="1" cellpadding="6" cellspacing="0" style="width: 100%;">
+    <thead>
+      <tr>
+        <th class="wm-sortable" data-col="site" style="text-align:left;">Site<span class="wm-sort-ind"></span></th>
+        <th class="wm-sortable" data-col="tcp">TCP<span class="wm-sort-ind"></span></th>
+        <th class="wm-sortable" data-col="http">HTTP<span class="wm-sort-ind"></span></th>
+        <th class="wm-sortable" data-col="check">Check<span class="wm-sort-ind"></span></th>
+        <th class="wm-sortable" data-col="state">State<span class="wm-sort-ind"></span></th>
+        <th class="wm-sortable" data-col="since" style="text-align:left;">Since (@tzLabel)<span class="wm-sort-ind"></span></th>
+      </tr>
+    </thead>
+    <tbody id="wm-body">
+@foreach (var obj in System.Linq.Enumerable.Cast<object>(Model.Rows))
 {
-    var cls = r.State.Equals("Up", StringComparison.OrdinalIgnoreCase) ? "wm-up"
-            : r.State.Equals("Down", StringComparison.OrdinalIgnoreCase) ? "wm-down"
-            : r.State.Equals("Degraded", StringComparison.OrdinalIgnoreCase) ? "wm-degraded"
-            : "wm-unknown";
+    var state = GetStr(obj, "State", "Status");
+    var stateLower = (state ?? "").Trim().ToLowerInvariant();
 
-    <tr class="@cls" data-targetid="@r.TargetId" data-state="@r.State" data-baseduration="@r.DurationSeconds">
+    var cls =
+        stateLower == "up" ? "wm-up" :
+        stateLower == "down" ? "wm-down" :
+        stateLower == "degraded" ? "wm-degraded" :
+        stateLower == "paused" ? "wm-paused" :
+        "wm-unknown";
+
+    var targetId = GetLong(obj, "TargetId");
+    var url = GetStr(obj, "Url", "URL");
+    var finalUrl = GetStr(obj, "FinalUrl", "LastFinalUrl");
+    var tcp = GetStr(obj, "Tcp");
+    var http = GetStr(obj, "Http");
+    var check = GetStr(obj, "Check", "DetectedLoginType");
+    var since = GetStr(obj, "SinceUtc", "SinceLocal", "Since", "StateSinceUtc");
+    var baseDur = GetStr(obj, "DurationSeconds", "BaseDurationSeconds", "Duration");
+
+    // Snapshot link for this target
+    var snapHref = $"{snapshotBasePath}/{Model.InstanceId}/{targetId}";
+
+    <tr class="@cls"
+        data-targetid="@targetId"
+        data-state="@state"
+        data-baseduration="@baseDur"
+        data-sort-site="@url"
+        data-sort-tcp="@tcp"
+        data-sort-http="@http"
+        data-sort-check="@check"
+        data-sort-state="@state">
       <td style="text-align:left;">
         <div class="wm-site1">
-          <a class="wm-link" href="@r.Url" target="_blank" rel="noopener noreferrer">@r.Url</a>
+          <!-- Row 1: link to per-target snapshot -->
+          <a class="wm-siteLink" href="@snapHref" target="_blank" rel="noopener noreferrer">@url</a>
         </div>
-        <div class="wm-site2">@r.FinalUrl</div>
+        <div class="wm-site2">
+          <!-- Row 2: link to live FinalUrl -->
+          @if (!string.IsNullOrWhiteSpace(finalUrl))
+          {
+            <a class="wm-finalLink" href="@finalUrl" target="_blank" rel="noopener noreferrer">@finalUrl</a>
+          }
+        </div>
       </td>
-      <td>@r.Tcp</td>
-      <td>@r.Http</td>
-      <td>@r.Check</td>
-      <td>@r.State</td>
+      <td>@tcp</td>
+      <td>@http</td>
+      <td>@check</td>
+      <td>@state</td>
       <td style="text-align:left;">
-        <div class="wm-since1">@r.SinceLocal</div>
+        <div class="wm-since1">@since</div>
         <div class="wm-since2"><span class="wm-age"></span></div>
       </td>
     </tr>
 }
-  </tbody>
-</table>
+    </tbody>
+  </table>
+</div>
 
 <script>
 (() => {
   const instanceId = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.InstanceId));
   const pollMs = 10000;
 
+  // CHANGE THIS IF YOUR SNAPSHOT ROUTE IS DIFFERENT
+  // Expected format: {snapshotBasePath}/{instanceId}/{targetId}
+  const snapshotBasePath = "/snapshots";
+
+  let instancePaused = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(isPaused));
   let lastPollAtMs = Date.now();
+
+  // Sort state (persist across refresh)
+  let sortCol = "site";
+  let sortDir = 1; // 1=asc, -1=desc
 
   function rowClass(state) {
     const s = (state || "").toLowerCase();
     if (s === "up") return "wm-up";
     if (s === "down") return "wm-down";
     if (s === "degraded") return "wm-degraded";
+    if (s === "paused") return "wm-paused";
     return "wm-unknown";
   }
 
@@ -114,6 +245,11 @@
       const ageEl = tr.querySelector(".wm-age");
       if (!ageEl) return;
 
+      if (state === "paused") {
+        ageEl.textContent = "Paused";
+        return;
+      }
+
       const label =
         state === "down" ? "Down" :
         state === "degraded" ? "Degraded" :
@@ -124,41 +260,191 @@
     });
   }
 
-  function renderRows(rows) {
+  function escapeHtml(s) {
+    return String(s)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
+  function pick(r, ...names) {
+    for (const n of names) {
+      if (r && r[n] !== undefined && r[n] !== null) return r[n];
+    }
+    return "";
+  }
+
+  function getSortKey(tr) {
+    switch (sortCol) {
+      case "site":
+        // Column 1 sorting must use Row 1 (Url)
+        return (tr.dataset.sortSite || "").toLowerCase();
+
+      case "tcp":
+        return (tr.dataset.sortTcp || "").toLowerCase();
+
+      case "http": {
+        const n = parseInt(tr.dataset.sortHttp || "", 10);
+        return Number.isFinite(n) ? n : -1;
+      }
+
+      case "check":
+        return (tr.dataset.sortCheck || "").toLowerCase();
+
+      case "state":
+        // Optional: make “Up/Degraded/Down/Unknown” sort stable by priority
+        // (You can change this order if you want.)
+        {
+          const s = (tr.dataset.sortState || "").toLowerCase();
+          const rank =
+            s === "up" ? 1 :
+            s === "degraded" ? 2 :
+            s === "down" ? 3 :
+            4;
+          return rank;
+        }
+
+      case "since":
+        // We don't have a reliable machine-readable timestamp here,
+        // so sort by durationSeconds (older state => larger duration)
+        return parseInt(tr.dataset.baseduration || "0", 10) || 0;
+
+      default:
+        return "";
+    }
+  }
+
+  function applySort() {
+    const body = document.getElementById("wm-body");
+    if (!body) return;
+
+    const rows = Array.from(body.querySelectorAll("tr"));
+    rows.sort((a, b) => {
+      const ka = getSortKey(a);
+      const kb = getSortKey(b);
+
+      if (typeof ka === "number" && typeof kb === "number") {
+        return (ka - kb) * sortDir;
+      }
+
+      if (ka < kb) return -1 * sortDir;
+      if (ka > kb) return  1 * sortDir;
+      return 0;
+    });
+
+    for (const tr of rows) body.appendChild(tr);
+    setSortIndicators();
+  }
+
+  function setSortIndicators() {
+    document.querySelectorAll("th.wm-sortable").forEach(th => {
+      const ind = th.querySelector(".wm-sort-ind");
+      if (!ind) return;
+      const col = th.dataset.col || "";
+      ind.textContent = (col === sortCol) ? (sortDir === 1 ? "▲" : "▼") : "";
+    });
+  }
+
+  function wireSorting() {
+    document.querySelectorAll("th.wm-sortable").forEach(th => {
+      th.addEventListener("click", () => {
+        const col = th.dataset.col || "";
+        if (!col) return;
+
+        if (sortCol === col) sortDir = -sortDir;
+        else {
+          sortCol = col;
+          sortDir = 1;
+        }
+        applySort();
+      });
+    });
+    setSortIndicators();
+  }
+
+  function renderRows(rows, pausedFlag) {
     const body = document.getElementById("wm-body");
     if (!body) return;
 
     body.innerHTML = "";
 
-    for (const r of rows) {
+    for (const r of rows || []) {
+      let state = pick(r, "state", "status", "State", "Status") || "Unknown";
+      if (pausedFlag) state = "Paused";
+      const targetId = String(pick(r, "targetId", "TargetId") || "");
+
       const tr = document.createElement("tr");
-      tr.className = rowClass(r.state);
-      tr.dataset.targetid = String(r.targetId);
-      tr.dataset.state = r.state || "Unknown";
-      tr.dataset.baseduration = r.durationSeconds || "0";
+      tr.className = rowClass(state);
+      tr.dataset.targetid = targetId;
+      tr.dataset.state = state;
+      tr.dataset.baseduration = (pausedFlag ? "0" : (pick(r, "durationSeconds", "DurationSeconds", "baseDurationSeconds", "BaseDurationSeconds") || "0"));
+
+      const urlText = pick(r, "url", "Url", "URL") || "";
+      const finalUrl = pick(r, "finalUrl", "FinalUrl", "lastFinalUrl", "LastFinalUrl") || "";
+      const tcpText = pick(r, "tcp", "Tcp") || "";
+      const httpText = pick(r, "http", "Http") || "";
+      const checkText = pick(r, "check", "Check", "detectedLoginType", "DetectedLoginType") || "";
+
+      // Sort datasets
+      tr.dataset.sortSite = urlText;
+      tr.dataset.sortTcp = tcpText;
+      tr.dataset.sortHttp = httpText;
+      tr.dataset.sortCheck = checkText;
+      tr.dataset.sortState = state;
 
       const tdSite = document.createElement("td");
       tdSite.style.textAlign = "left";
-      tdSite.innerHTML =
-        `<div class="wm-site1"><a class="wm-link" target="_blank" rel="noopener noreferrer" href="${escapeHtml(r.url || "")}">${escapeHtml(r.url || "")}</a></div>` +
-        `<div class="wm-site2">${escapeHtml(r.finalUrl || "")}</div>`;
+
+      const div1 = document.createElement("div");
+      div1.className = "wm-site1";
+
+      // Row 1: snapshot link (text is the URL for sorting)
+      const snapHref = `${snapshotBasePath}/${encodeURIComponent(instanceId)}/${encodeURIComponent(targetId)}`;
+
+      const a1 = document.createElement("a");
+      a1.className = "wm-siteLink";
+      a1.href = snapHref;
+      a1.target = "_blank";
+      a1.rel = "noopener noreferrer";
+      a1.textContent = urlText;
+      div1.appendChild(a1);
+
+      const div2 = document.createElement("div");
+      div2.className = "wm-site2";
+
+      // Row 2: finalUrl link
+      if (finalUrl) {
+        const a2 = document.createElement("a");
+        a2.className = "wm-finalLink";
+        a2.href = finalUrl;
+        a2.target = "_blank";
+        a2.rel = "noopener noreferrer";
+        a2.textContent = finalUrl;
+        div2.appendChild(a2);
+      }
+
+      tdSite.appendChild(div1);
+      tdSite.appendChild(div2);
 
       const tdTcp = document.createElement("td");
-      tdTcp.textContent = r.tcp || "";
+      tdTcp.textContent = tcpText;
 
       const tdHttp = document.createElement("td");
-      tdHttp.textContent = r.http || "";
+      tdHttp.textContent = httpText;
 
       const tdCheck = document.createElement("td");
-      tdCheck.textContent = r.check || "";
+      tdCheck.textContent = checkText;
 
       const tdState = document.createElement("td");
-      tdState.textContent = r.state || "";
+      tdState.textContent = state;
 
       const tdSince = document.createElement("td");
       tdSince.style.textAlign = "left";
+      const since = pick(r, "sinceLocal", "SinceLocal", "since", "Since", "stateSinceUtc", "StateSinceUtc", "sinceUtc", "SinceUtc") || "";
       tdSince.innerHTML =
-        `<div class="wm-since1">${escapeHtml(r.sinceLocal || "")}</div>` +
+        `<div class="wm-since1">${escapeHtml(since)}</div>` +
         `<div class="wm-since2"><span class="wm-age"></span></div>`;
 
       tr.appendChild(tdSite);
@@ -173,15 +459,7 @@
 
     lastPollAtMs = Date.now();
     updateAges();
-  }
-
-  function escapeHtml(s) {
-    return String(s)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#39;");
+    applySort(); // keep sorting after refresh
   }
 
   async function poll() {
@@ -192,14 +470,30 @@
 
       const data = await resp.json();
 
-      const lastCheck = document.getElementById("wm-lastcheck");
-      if (lastCheck) lastCheck.textContent = data.lastCheckLocal || "";
+      instancePaused = !!(data.isPaused ?? data.IsPaused);
 
-      renderRows(data.rows || []);
+      const lastCheck = document.getElementById("wm-lastcheck");
+      if (lastCheck) {
+        const base =
+          data.lastCheckLocal ??
+          data.lastCheckUtc ??
+          data.lastCheck ??
+          "";
+        if (instancePaused) {
+          lastCheck.textContent = base ? (base + " (Paused)") : "(Paused)";
+        } else {
+          lastCheck.textContent = base;
+        }
+      }
+
+      renderRows(data.rows || [], instancePaused);
     } catch {
       // ignore transient poll failures
     }
   }
+
+  wireSorting();
+  applySort();
 
   setInterval(updateAges, 1000);
   setInterval(poll, pollMs);
