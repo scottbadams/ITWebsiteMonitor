@@ -7,9 +7,76 @@
 @{
   var disp = string.IsNullOrWhiteSpace(Model.DisplayName) ? Model.InstanceId : Model.DisplayName;
   ViewData["Title"] = $"Configure - {disp}";
+
+  var q = ViewContext?.HttpContext?.Request?.Query;
+  var embedVal = (q?["embed"].ToString() ?? "").Trim();
+  var isEmbed =
+    string.Equals(embedVal, "1", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(embedVal, "true", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(embedVal, "yes", StringComparison.OrdinalIgnoreCase);
+
+  var zVal = (q?["z"].ToString() ?? "").Trim();
+  var isZabbixChild =
+    string.Equals(zVal, "1", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(zVal, "true", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(zVal, "yes", StringComparison.OrdinalIgnoreCase);
+
+  var schemeRaw = (q?["scheme"].ToString() ?? "").Trim();
+  var schemeParam = (schemeRaw ?? "").Trim().ToLowerInvariant();
+  var schemeIsValid = schemeParam == "light" || schemeParam == "dark";
+
+  var backQs = new System.Collections.Generic.List<string>();
+  if (isEmbed) backQs.Add("embed=1");
+  if (isZabbixChild) backQs.Add("z=1");
+  if (schemeIsValid) backQs.Add("scheme=" + schemeParam);
+  var backHref = $"/monitor/{Model.InstanceId}" + (backQs.Count > 0 ? ("?" + string.Join("&", backQs)) : "");
+
+  var targetsQs = new System.Collections.Generic.List<string>();
+  targetsQs.Add("embed=1");
+  if (isZabbixChild) targetsQs.Add("z=1");
+  if (schemeIsValid) targetsQs.Add("scheme=" + schemeParam);
+  var targetsSrc = $"/setup/instances/{Model.InstanceId}/targets?" + string.Join("&", targetsQs);
 }
 
-<p class="wm-meta">Instance: <b>@Model.InstanceId</b></p>
+
+
+@section PageActions {
+  @if (!isEmbed)
+  {
+    <a class="wm-btn" href="/setup">Back to Setup</a>
+    <a class="wm-btn" href="/monitor/@Model.InstanceId">Monitor</a>
+  }
+}
+
+
+@if (isEmbed)
+{
+  <div class="wm-actions" style="margin-bottom:10px; display:flex; align-items:center; justify-content:space-between; gap:10px;">
+    <div style="font-weight:700; font-size:1.05rem; line-height:1.2;">@disp</div>
+    <a class="wm-btn" href="@backHref" onclick="if (window.history && window.history.length > 1) { window.history.back(); return false; }">Back</a>
+  </div>
+
+  <script>
+    (function () {
+      try {
+        if (window.parent && window.parent !== window.self) {
+          var msg = {
+            type: 'wm:context',
+            mode: 'configure',
+            instanceId: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.InstanceId)),
+            displayName: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(disp))
+          };
+          window.parent.postMessage(msg, window.location.origin);
+        }
+      } catch (e) { }
+    })();
+  </script>
+}
+
+@if (!isEmbed)
+{
+  <p class="wm-meta">Instance: <b>@Model.InstanceId</b></p>
+}
 
 @if (!string.IsNullOrWhiteSpace(Model.Error))
 {
@@ -20,7 +87,16 @@
     <p style="color:green; font-weight:600;">@Model.Info</p>
 }
 
-<form method="post" asp-page-handler="Save">
+<div class="wm-subtabs" data-wm-subtabs="setup-instance">
+  <div class="wm-tablist" role="tablist" aria-label="Configure sections">
+    <button type="button" class="wm-tab" data-tab="instance" role="tab" aria-selected="true" aria-controls="wm-tab-instance" tabindex="0"><span class="wm-btn">Instance</span></button>
+    <button type="button" class="wm-tab" data-tab="smtp" role="tab" aria-selected="false" aria-controls="wm-tab-smtp" tabindex="-1"><span class="wm-btn">SMTP Settings</span></button>
+    <button type="button" class="wm-tab" data-tab="service" role="tab" aria-selected="false" aria-controls="wm-tab-service" tabindex="-1"><span class="wm-btn">Service</span></button>
+    <button type="button" class="wm-tab" data-tab="targets" role="tab" aria-selected="false" aria-controls="wm-tab-targets" tabindex="-1"><span class="wm-btn">Targets</span></button>
+  </div>
+
+  <div class="wm-tabpanel wm-subtabpanel is-active" id="wm-tab-instance" data-panel="instance" role="tabpanel">
+<form method="post" asp-page-handler="Save" asp-route-embed="@(isEmbed ? "1" : null)" asp-route-z="@(isZabbixChild ? "1" : null)" asp-route-scheme="@(schemeIsValid ? schemeParam : null)">
     @Html.AntiForgeryToken()
     <input type="hidden" asp-for="InstanceId" />
 
@@ -47,13 +123,11 @@
     <label>Output Folder (optional)</label><br />
     <input asp-for="OutputFolder" /><br /><br />
 
-    <button type="submit">Save</button>
+    <button type="submit" class="wm-btn">Save</button>
 </form>
+  </div>
 
-<hr />
-
-<h2>SMTP Settings</h2>
-
+  <div class="wm-tabpanel wm-subtabpanel" id="wm-tab-smtp" data-panel="smtp" role="tabpanel" hidden>
 <form method="post">
     @Html.AntiForgeryToken()
     <input type="hidden" asp-for="InstanceId" />
@@ -85,35 +159,94 @@
     <textarea asp-for="RecipientsText" rows="6" style="width:420px;"></textarea>
     <br /><br />
 
-    <button type="submit" asp-page-handler="SaveSmtp">Save SMTP</button>
+    <button type="submit" class="wm-btn" asp-page-handler="SaveSmtp" asp-route-embed="@(isEmbed ? "1" : null)" asp-route-z="@(isZabbixChild ? "1" : null)" asp-route-scheme="@(schemeIsValid ? schemeParam : null)">Save SMTP</button>
 
     <!-- Saves settings, then opens the popup page in a new window/tab -->
-    <button type="submit" asp-page-handler="SaveAndTest" formtarget="_blank">Test SMTP</button>
+    <button type="submit" class="wm-btn" asp-page-handler="SaveAndTest" asp-route-embed="@(isEmbed ? "1" : null)" asp-route-z="@(isZabbixChild ? "1" : null)" asp-route-scheme="@(schemeIsValid ? schemeParam : null)" formtarget="_blank">Test SMTP</button>
 </form>
+  </div>
 
-<hr />
-
-<h2>Runtime</h2>
+  <div class="wm-tabpanel wm-subtabpanel" id="wm-tab-service" data-panel="service" role="tabpanel" hidden>
 <p>State: <b>@Model.RuntimeState</b> (since @Model.RuntimeChangedUtc.ToString("u"))</p>
 
-<form method="post" asp-page-handler="Start" style="display:inline;">
+<form method="post" asp-page-handler="Start" asp-route-embed="@(isEmbed ? "1" : null)" asp-route-z="@(isZabbixChild ? "1" : null)" asp-route-scheme="@(schemeIsValid ? schemeParam : null)" style="display:inline;">
     @Html.AntiForgeryToken()
     <input type="hidden" asp-for="InstanceId" />
-    <button type="submit">Start</button>
+    <button type="submit" class="wm-btn">Start</button>
 </form>
-<form method="post" asp-page-handler="Stop" style="display:inline;">
+<form method="post" asp-page-handler="Stop" asp-route-embed="@(isEmbed ? "1" : null)" asp-route-z="@(isZabbixChild ? "1" : null)" asp-route-scheme="@(schemeIsValid ? schemeParam : null)" style="display:inline;">
     @Html.AntiForgeryToken()
     <input type="hidden" asp-for="InstanceId" />
-    <button type="submit">Stop</button>
+    <button type="submit" class="wm-btn">Stop</button>
 </form>
-<form method="post" asp-page-handler="Restart" style="display:inline;">
+<form method="post" asp-page-handler="Restart" asp-route-embed="@(isEmbed ? "1" : null)" asp-route-z="@(isZabbixChild ? "1" : null)" asp-route-scheme="@(schemeIsValid ? schemeParam : null)" style="display:inline;">
     @Html.AntiForgeryToken()
     <input type="hidden" asp-for="InstanceId" />
-    <button type="submit">Restart</button>
+    <button type="submit" class="wm-btn">Restart</button>
 </form>
+  </div>
 
-<p>
-  <a href="/setup">Back to Setup</a>
-  | <a href="/setup/instances/@Model.InstanceId/targets">Targets</a>
-  | <a href="/monitor/@Model.InstanceId">Monitor</a>
-</p>
+
+  <div class="wm-tabpanel wm-subtabpanel" id="wm-tab-targets" data-panel="targets" role="tabpanel" hidden>
+    <iframe class="wm-iframe" src="@targetsSrc" loading="lazy"></iframe>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  var root = document.querySelector('[data-wm-subtabs="setup-instance"]');
+  if (!root) return;
+
+  var tabs = Array.prototype.slice.call(root.querySelectorAll('.wm-tab[data-tab]'));
+  var panels = Array.prototype.slice.call(root.querySelectorAll('.wm-subtabpanel[data-panel]'));
+
+  function hasTab(name) {
+    for (var i = 0; i < tabs.length; i++) {
+      if ((tabs[i].getAttribute('data-tab') || '').toLowerCase() === name) return true;
+    }
+    return false;
+  }
+
+  function setActive(name, updateHash) {
+    name = (name || '').toLowerCase();
+
+    for (var i = 0; i < tabs.length; i++) {
+      var t = tabs[i];
+      var active = ((t.getAttribute('data-tab') || '').toLowerCase() === name);
+      t.setAttribute('aria-selected', active ? 'true' : 'false');
+      t.tabIndex = active ? 0 : -1;
+    }
+
+    for (var j = 0; j < panels.length; j++) {
+      var p = panels[j];
+      var on = ((p.getAttribute('data-panel') || '').toLowerCase() === name);
+      p.classList.toggle('is-active', on);
+      p.hidden = !on;
+    }
+
+    if (updateHash) {
+      try { history.replaceState(null, '', '#' + name); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function applyFromHash() {
+    var h = (window.location.hash || '').replace('#', '').toLowerCase();
+    if (h && hasTab(h)) setActive(h, false);
+    else setActive('instance', false);
+  }
+
+  for (var i = 0; i < tabs.length; i++) {
+    (function (t) {
+      t.addEventListener('click', function () {
+        var n = (t.getAttribute('data-tab') || '').toLowerCase();
+        if (!n) return;
+        setActive(n, true);
+      });
+    })(tabs[i]);
+  }
+
+  window.addEventListener('hashchange', applyFromHash);
+  applyFromHash();
+})();
+</script>

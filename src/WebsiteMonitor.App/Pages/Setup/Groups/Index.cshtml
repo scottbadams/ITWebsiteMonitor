@@ -1,0 +1,47 @@
+@page "/setup/groups"
+@model WebsiteMonitor.App.Pages.Setup.Groups.IndexModel
+@{
+  ViewData["Title"] = "Groups";
+}
+
+@section PageActions {
+  <a class="wm-btn" href="/setup">Back to Setup</a>
+  <a class="wm-btn wm-primary" href="/setup/groups/new">Add Group</a>
+}
+
+<h1>Groups</h1>
+
+@if (!string.IsNullOrWhiteSpace(Model.Error))
+{
+  <p class="wm-meta" style="color:#b00;">@Model.Error</p>
+}
+
+<table class="wm-table">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Enabled</th>
+      <th>Members</th>
+      <th class="wm-cell-actions">Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+  @foreach (var g in Model.Groups)
+  {
+    <tr>
+      <td>@g.Name</td>
+      <td>@(g.Enabled ? "Yes" : "No")</td>
+      <td>@g.MemberCount</td>
+      <td class="wm-cell-actions">
+        <a class="wm-btn" href="/setup/groups/@g.Id">Configure</a>
+        <form method="post" asp-page-handler="Toggle" asp-route-id="@g.Id" style="display:inline">
+          <button type="submit" class="wm-btn">@(g.Enabled ? "Disable" : "Enable")</button>
+        </form>
+        <form method="post" asp-page-handler="Delete" asp-route-id="@g.Id" style="display:inline">
+          <button type="submit" class="wm-btn wm-danger" onclick="return confirm('Delete group: @g.Name ?');">Delete</button>
+        </form>
+      </td>
+    </tr>
+  }
+  </tbody>
+</table>

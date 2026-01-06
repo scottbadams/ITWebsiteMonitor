@@ -1,0 +1,68 @@
+@page "/setup/groups/{id:int}"
+@model WebsiteMonitor.App.Pages.Setup.Groups.EditModel
+@{
+  ViewData["Title"] = "Group";
+}
+
+@section PageActions {
+  <a class="wm-btn" href="/setup/groups">Back</a>
+}
+
+<h1>Group</h1>
+
+@if (!string.IsNullOrWhiteSpace(Model.Error))
+{
+  <p class="wm-meta" style="color:#b00;">@Model.Error</p>
+}
+
+@if (Model.Group is null)
+{
+  <p class="wm-meta" style="color:#b00;">Group not found.</p>
+}
+else
+{
+  <form method="post">
+    <input type="hidden" name="Id" value="@Model.Group.Id" />
+
+    <table class="wm-formtable">
+      <tr>
+        <td style="padding-right:10px; white-space:nowrap;"><label for="Name">Name</label></td>
+        <td><input id="Name" type="text" name="Name" value="@Model.Group.Name" required style="width:420px;" /></td>
+      </tr>
+      <tr>
+        <td></td>
+        <td>
+          <label>
+            <input type="checkbox" name="Enabled" value="true" @(Model.Group.Enabled ? "checked" : "") />
+            Enabled
+          </label>
+        </td>
+      </tr>
+    </table>
+
+    <h3>Roles granted by this group</h3>
+    <p class="wm-meta">Members inherit these roles.</p>
+    <div style="margin-bottom:12px;">
+      @foreach (var r in Model.AllRoles)
+      {
+        <label style="display:inline-block; margin-right:14px; margin-bottom:6px;">
+          <input type="checkbox" name="RoleNames" value="@r" @(Model.RoleNames.Contains(r) ? "checked" : "") />
+          @r
+        </label>
+      }
+    </div>
+
+    <h3>Members</h3>
+    <div style="margin-bottom:12px;">
+      @foreach (var u in Model.AllUsers)
+      {
+        <label style="display:inline-block; margin-right:14px; margin-bottom:6px;">
+          <input type="checkbox" name="UserIds" value="@u.Id" @(Model.UserIds.Contains(u.Id) ? "checked" : "") />
+          @u.Email
+        </label>
+      }
+    </div>
+
+    <button type="submit" class="wm-btn wm-primary">Save</button>
+  </form>
+}

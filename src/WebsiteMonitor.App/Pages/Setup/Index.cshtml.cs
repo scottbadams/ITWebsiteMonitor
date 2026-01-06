@@ -4,8 +4,11 @@ using Microsoft.EntityFrameworkCore;
 using WebsiteMonitor.Monitoring.Runtime;
 using WebsiteMonitor.Storage.Data;
 
+using Microsoft.AspNetCore.Authorization;
+
 namespace WebsiteMonitor.App.Pages.Setup;
 
+[Authorize(Roles = "Admin")]
 public sealed class IndexModel : PageModel
 {
     private readonly WebsiteMonitorDbContext _db;

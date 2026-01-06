@@ -1,0 +1,52 @@
+@page "/setup/users/new"
+@model WebsiteMonitor.App.Pages.Setup.Users.NewModel
+@{
+  ViewData["Title"] = "New User";
+}
+
+@section PageActions {
+  <a class="wm-btn" href="/setup/users">Back</a>
+}
+
+<h1>Create user</h1>
+
+@if (!string.IsNullOrWhiteSpace(Model.Error))
+{
+  <p class="wm-meta" style="color:#b00;">@Model.Error</p>
+}
+
+<form method="post">
+  <table class="wm-formtable">
+    <tr>
+      <td style="padding-right:10px; white-space:nowrap;"><label for="Email">Email (required)</label></td>
+      <td><input id="Email" type="email" name="Email" value="@Model.Email" required style="width:420px;" /></td>
+    </tr>
+    <tr>
+      <td style="padding-right:10px; white-space:nowrap;"><label for="FullName">Full name</label></td>
+      <td><input id="FullName" type="text" name="FullName" value="@Model.FullName" style="width:420px;" /></td>
+    </tr>
+    <tr>
+      <td style="padding-right:10px; white-space:nowrap;"><label for="PhoneNumber">Phone</label></td>
+      <td><input id="PhoneNumber" type="tel" name="PhoneNumber" value="@Model.PhoneNumber" style="width:420px;" /></td>
+    </tr>
+    <tr>
+      <td style="padding-right:10px; white-space:nowrap;"><label for="Password">Temporary password</label></td>
+      <td><input id="Password" type="password" name="Password" required minlength="8" style="width:420px;" /></td>
+    </tr>
+    <tr>
+      <td></td>
+      <td>
+        <label>
+          <input type="checkbox" name="DarkThemeEnabled" value="true" @(Model.DarkThemeEnabled ? "checked" : "") />
+          Force dark theme
+        </label>
+      </td>
+    </tr>
+    <tr>
+      <td></td>
+      <td style="padding-top:10px;">
+        <button type="submit" class="wm-btn wm-primary">Create</button>
+      </td>
+    </tr>
+  </table>
+</form>

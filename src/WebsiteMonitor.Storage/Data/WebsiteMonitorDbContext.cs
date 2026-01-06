@@ -13,6 +13,12 @@ public sealed class WebsiteMonitorDbContext : IdentityDbContext<ApplicationUser>
     public WebsiteMonitorDbContext(DbContextOptions<WebsiteMonitorDbContext> options) : base(options) { }
 
     public DbSet<Instance> Instances => Set<Instance>();
+
+    public DbSet<Group> Groups => Set<Group>();
+    public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
+    public DbSet<GroupRole> GroupRoles => Set<GroupRole>();
+    public DbSet<SystemSettings> SystemSettings => Set<SystemSettings>();
+
     public DbSet<WebsiteMonitor.Storage.Models.Target> Targets => Set<WebsiteMonitor.Storage.Models.Target>();
     public DbSet<WebsiteMonitor.Storage.Models.Check> Checks => Set<WebsiteMonitor.Storage.Models.Check>();
     public DbSet<WebsiteMonitor.Storage.Models.TargetState> States => Set<WebsiteMonitor.Storage.Models.TargetState>();
@@ -23,7 +29,34 @@ public sealed class WebsiteMonitorDbContext : IdentityDbContext<ApplicationUser>
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        base.OnModelCreating(modelBuilder);
+        
+        // --- Groups / Roles mapping ---
+        modelBuilder.Entity<Group>(b =>
+        {
+            b.HasIndex(x => x.Name).IsUnique();
+            b.Property(x => x.Name).HasMaxLength(200).IsRequired();
+        });
+
+        modelBuilder.Entity<GroupMember>(b =>
+        {
+            b.HasKey(x => new { x.GroupId, x.UserId });
+            b.HasOne(x => x.Group).WithMany(g => g.Members).HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<GroupRole>(b =>
+        {
+            b.HasKey(x => new { x.GroupId, x.RoleName });
+            b.Property(x => x.RoleName).HasMaxLength(256).IsRequired();
+            b.HasOne(x => x.Group).WithMany(g => g.Roles).HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SystemSettings>(b =>
+        {
+            b.HasKey(x => x.Id);
+        });
+
+base.OnModelCreating(modelBuilder);
 
         modelBuilder.Entity<Instance>(b =>
         {

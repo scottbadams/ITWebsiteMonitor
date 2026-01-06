@@ -5,15 +5,23 @@
   ViewData["Title"] = "Setup";
 }
 
-@section PageActions {
-  <a class="wm-btn" asp-page="./FirstRun">Create Instance</a>
-}
-
 <form id="wm-csrf-form" method="post" style="display:none;">
   @Html.AntiForgeryToken()
 </form>
 
-<p class="wm-meta">Instances: <b>@Model.Rows.Count</b></p>
+
+<div class="wm-subtabs" data-wm-subtabs="setup-main">
+  <div class="wm-tablist" role="tablist" aria-label="Setup Tabs">
+    <button type="button" class="wm-btn wm-tabbtn" role="tab" aria-selected="true" data-tab="instances">Instances</button>
+    <button type="button" class="wm-btn wm-tabbtn" role="tab" aria-selected="false" data-tab="usersgroups">Users/Groups</button>
+    <button type="button" class="wm-btn wm-tabbtn" role="tab" aria-selected="false" data-tab="system">System Settings</button>
+  </div>
+
+  <div class="wm-subtabpanel wm-tabpanel" role="tabpanel" data-panel="instances">
+<div class="wm-actions" style="display:flex; justify-content:flex-start; gap:12px; margin: 0 0 6px 0;">
+  <a class="wm-btn wm-primary" asp-page="./FirstRun">Create Instance</a>
+</div>
+<p class="wm-meta" style="margin:0 0 8px 0;">Instances: <b>@Model.Rows.Count</b></p>
 
 <table class="wm-table" id="wm-setup-table">
   <thead>
@@ -89,7 +97,7 @@
   try {
     const saved = JSON.parse(localStorage.getItem('wm_setup_sort') || 'null');
     if (saved && saved.key) { sortKey = saved.key; sortDir = saved.dir === 'desc' ? 'desc' : 'asc'; }
-  } catch {}
+  } catch (e) {}
 
   function getValue(tr, key){
     if (key === 'enabled') return tr.getAttribute('data-enabled') || '0';
@@ -131,7 +139,7 @@
     });
     rows.forEach(r => tbody.appendChild(r));
     setIndicators();
-    try { localStorage.setItem('wm_setup_sort', JSON.stringify({ key: sortKey, dir: sortDir })); } catch {}
+    try { localStorage.setItem('wm_setup_sort', JSON.stringify({ key: sortKey, dir: sortDir })); } catch (e) {}
   }
 
   function setIndicators(){
@@ -210,3 +218,340 @@
 })();
 </script>
 }
+
+  </div>
+
+  <div class="wm-subtabpanel wm-tabpanel" role="tabpanel" data-panel="usersgroups" hidden>
+    <div class="wm-subtabs" data-wm-subtabs="setup-usersgroups">
+      <div class="wm-tablist" role="tablist" aria-label="Users Groups Roles">
+        <button type="button" class="wm-btn wm-tabbtn" role="tab" aria-selected="true" data-tab="users">Users</button>
+        <button type="button" class="wm-btn wm-tabbtn" role="tab" aria-selected="false" data-tab="groups">Groups</button>
+        <button type="button" class="wm-btn wm-tabbtn" role="tab" aria-selected="false" data-tab="roles">Roles</button>
+      </div>
+
+      <div class="wm-subtabpanel wm-tabpanel" role="tabpanel" data-panel="users">
+        <div id="wm-users-host" class="wm-embed-host"><div class="wm-meta">Users will load when this tab is opened.</div></div>
+      </div>
+
+      <div class="wm-subtabpanel wm-tabpanel" role="tabpanel" data-panel="groups" hidden>
+        <div id="wm-groups-host" class="wm-embed-host"><div class="wm-meta">Groups will load when this tab is opened.</div></div>
+      </div>
+
+      <div class="wm-subtabpanel wm-tabpanel" role="tabpanel" data-panel="roles" hidden>
+        <div id="wm-roles-host" class="wm-embed-host"><div class="wm-meta">Roles will load when this tab is opened.</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wm-subtabpanel wm-tabpanel" role="tabpanel" data-panel="system" hidden>
+      <div id="wm-systemsettings-host" class="wm-systemsettings-host">
+    <div class="wm-meta">System Settings will load when this tab is opened.</div>
+  </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  function initSubtabs(root){
+    if(!root) return;
+    const key = "wm_subtabs_" + (root.getAttribute("data-wm-subtabs") || "");
+    const tablist = root.querySelector(":scope > .wm-tablist") || root.querySelector(".wm-tablist");
+    let btns = [];
+    if(tablist){
+      btns = Array.from(tablist.children).filter(el => el && el.classList && el.classList.contains("wm-tabbtn") && el.getAttribute("data-tab"));
+    }
+    let panels = Array.from(root.children).filter(el => el && el.classList && el.classList.contains("wm-subtabpanel") && el.getAttribute("data-panel"));
+    if(btns.length===0 || panels.length===0) return;
+
+    function activate(tab){
+      // Guard: if this tab name doesn't exist at this level, don't hide everything.
+      if(!panels.some(p => (p && p.dataset && p.dataset.panel) === tab)) return;
+      btns.forEach(b=>{
+        const on = b.dataset.tab === tab;
+        b.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      panels.forEach(p=>{
+        const on = p.dataset.panel === tab;
+        p.hidden = !on;
+      });
+      try { localStorage.setItem(key, tab); } catch (e) {}
+    }
+
+    btns.forEach(b=>{
+      b.addEventListener("click", ()=>activate(b.dataset.tab));
+    });
+
+    // Restore last active tab, fallback to first
+    let initial = btns[0].dataset.tab;
+    try {
+      const saved = localStorage.getItem(key);
+      if(saved && btns.some(b=>b.dataset.tab===saved)) initial = saved;
+    } catch (e) {}
+    activate(initial);
+  }
+
+  document.querySelectorAll(".wm-subtabs[data-wm-subtabs]").forEach(initSubtabs);
+})();
+
+  // Load System Settings into the "System Settings" tab WITHOUT an iframe.
+  // This pulls the embed view and injects its <main> content into the tab panel.
+  async function wmLoadSystemSettingsIntoTab(){
+    const host = document.getElementById("wm-systemsettings-host");
+    if(!host) return;
+    if(host.getAttribute("data-loaded")==="1") return;
+
+    host.innerHTML = '<div class="wm-meta">Loading System Settings...</div>';
+
+    try {
+      const res = await fetch("/setup/systemsettings?embed=1", { credentials: "same-origin" });
+      if(!res.ok) throw new Error("HTTP " + res.status);
+      const html = await res.text();
+
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      const main = doc.querySelector("main.container") || doc.querySelector("main") || doc.body;
+      host.innerHTML = (main ? main.innerHTML : html);
+
+      // Ensure the form posts to /setup/systemsettings (not /setup).
+      const form = host.querySelector("form");
+      if(form){
+        const action = (form.getAttribute("action") || "").trim();
+        if(!action){
+          form.setAttribute("action", "/setup/systemsettings");
+        }
+
+        form.addEventListener("submit", async function(ev){
+          ev.preventDefault();
+
+          // Disable submit buttons while saving
+          const submits = Array.from(form.querySelectorAll('button[type="submit"], input[type="submit"]'));
+          submits.forEach(b => b.disabled = true);
+
+          try {
+            const url = form.getAttribute("action") || "/setup/systemsettings";
+            const fd = new FormData(form);
+
+            const postRes = await fetch(url, {
+              method: "POST",
+              credentials: "same-origin",
+              body: fd
+            });
+
+            const postHtml = await postRes.text();
+            const postDoc = new DOMParser().parseFromString(postHtml, "text/html");
+            const postMain = postDoc.querySelector("main.container") || postDoc.querySelector("main") || postDoc.body;
+            host.innerHTML = (postMain ? postMain.innerHTML : postHtml);
+
+            // Recurse to re-wire the new form (validation, etc.)
+            host.removeAttribute("data-loaded");
+            await wmLoadSystemSettingsIntoTab();
+          } catch (err) {
+            alert("Save failed: " + (err && err.message ? err.message : err));
+          } finally {
+            // If the form got replaced, these buttons may not exist anymore; safe to ignore.
+          }
+        });
+      }
+
+      host.setAttribute("data-loaded","1");
+    } catch (err) {
+      host.innerHTML = '<div class="wm-meta">Failed to load System Settings: ' + (err && err.message ? err.message : err) + '</div>';
+    }
+  }
+
+
+  // Load Users/Groups/Roles into the Users/Groups tab WITHOUT an iframe.
+  // These pull the embed views and inject their <main> content into the sub-tab panels.
+  function wmEmbedEnsureEmbedParam(rawUrl){
+    try {
+      var u = new URL(rawUrl, window.location.origin);
+      if (!u.searchParams.has("embed")) u.searchParams.set("embed", "1");
+      return u.pathname + u.search + u.hash;
+    } catch (e) {
+      // Fallback: if rawUrl is a relative path, append embed=1 safely
+      if (rawUrl.indexOf("?") >= 0) {
+        return (rawUrl.indexOf("embed=") >= 0) ? rawUrl : (rawUrl + "&embed=1");
+      }
+      return rawUrl + "?embed=1";
+    }
+  }
+
+  function wmEmbedExtractMainInnerHtml(html){
+    var doc = new DOMParser().parseFromString(html, "text/html");
+    var main = doc.querySelector("main.container") || doc.querySelector("main") || doc.body;
+    return (main ? main.innerHTML : html);
+  }
+
+  function wmEmbedIsSameOriginAndAllowed(u, allowedPrefixes){
+    try {
+      var url = new URL(u, window.location.origin);
+      if (url.origin !== window.location.origin) return false;
+      var p = url.pathname.toLowerCase();
+      for (var i=0; i<allowedPrefixes.length; i++){
+        if (p.indexOf(allowedPrefixes[i]) === 0) return true;
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  async function wmEmbedLoadIntoHost(host, rawUrl, allowedPrefixes){
+    if(!host) return;
+    var url = wmEmbedEnsureEmbedParam(rawUrl);
+
+    host.innerHTML = '<div class="wm-meta">Loading...</div>';
+
+    try {
+      var res = await fetch(url, { credentials: "same-origin" });
+      if(!res.ok) throw new Error("HTTP " + res.status);
+      var html = await res.text();
+
+      host.innerHTML = wmEmbedExtractMainInnerHtml(html);
+      host.setAttribute("data-current-url", rawUrl);
+
+      wmEmbedWireHost(host, allowedPrefixes);
+
+      host.setAttribute("data-loaded","1");
+    } catch (err) {
+      host.innerHTML = '<div class="wm-meta">Failed to load: ' + (err && err.message ? err.message : err) + '</div>';
+    }
+  }
+
+  function wmEmbedWireHost(host, allowedPrefixes){
+    if(!host) return;
+
+    // Intercept clicks on internal links so they load inside the same pane.
+    Array.from(host.querySelectorAll('a[href]')).forEach(function(a){
+      a.addEventListener("click", function(ev){
+        // allow ctrl/cmd-click, middle-click, new-tab targets
+        if (ev.defaultPrevented) return;
+        if (ev.button && ev.button !== 0) return;
+        if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+        if ((a.getAttribute("target") || "").toLowerCase() === "_blank") return;
+
+        var href = a.getAttribute("href") || "";
+        if (!href || href === "#" || href.indexOf("javascript:") === 0 || href.indexOf("mailto:") === 0) return;
+
+        var abs = a.href || href;
+        if (!wmEmbedIsSameOriginAndAllowed(abs, allowedPrefixes)) return;
+
+        ev.preventDefault();
+        // Load the target page into the same pane (keeps you on /setup)
+        wmEmbedLoadIntoHost(host, abs, allowedPrefixes);
+      });
+    });
+
+    // Intercept form submits (New/Edit/Delete/Create) so they stay in-pane.
+    Array.from(host.querySelectorAll("form")).forEach(function(form){
+      form.addEventListener("submit", async function(ev){
+        ev.preventDefault();
+
+        var method = (form.getAttribute("method") || "POST").toUpperCase();
+        var action = (form.getAttribute("action") || "").trim();
+        if(!action){
+          // If action is empty, POST back to the current page.
+          action = host.getAttribute("data-current-url") || window.location.pathname;
+        }
+
+        try {
+          // Disable submit buttons while saving
+          var submits = Array.from(form.querySelectorAll('button[type="submit"], input[type="submit"]'));
+          submits.forEach(function(b){ b.disabled = true; });
+
+          var url = action;
+          var fd = new FormData(form);
+
+          var postRes = await fetch(url, {
+            method: method,
+            credentials: "same-origin",
+            body: fd
+          });
+
+          var ct = (postRes.headers.get("content-type") || "").toLowerCase();
+
+          if (ct.indexOf("application/json") >= 0) {
+            // If a handler returns JSON, reload the pane back to its base list.
+            var base = host.getAttribute("data-base-url") || host.getAttribute("data-current-url") || url;
+            wmEmbedLoadIntoHost(host, base, allowedPrefixes);
+            return;
+          }
+
+          var postHtml = await postRes.text();
+          host.innerHTML = wmEmbedExtractMainInnerHtml(postHtml);
+
+          // Re-wire links/forms in the new content
+          wmEmbedWireHost(host, allowedPrefixes);
+        } catch (err) {
+          alert("Save failed: " + (err && err.message ? err.message : err));
+        }
+      });
+    });
+  }
+
+  async function wmLoadUsersIntoTab(){
+    var host = document.getElementById("wm-users-host");
+    if(!host) return;
+    if(host.getAttribute("data-loaded")==="1") return;
+    host.setAttribute("data-base-url", "/setup/users");
+    await wmEmbedLoadIntoHost(host, "/setup/users", ["/setup/users"]);
+  }
+
+  async function wmLoadGroupsIntoTab(){
+    var host = document.getElementById("wm-groups-host");
+    if(!host) return;
+    if(host.getAttribute("data-loaded")==="1") return;
+    host.setAttribute("data-base-url", "/setup/groups");
+    await wmEmbedLoadIntoHost(host, "/setup/groups", ["/setup/groups"]);
+  }
+
+  async function wmLoadRolesIntoTab(){
+    var host = document.getElementById("wm-roles-host");
+    if(!host) return;
+    if(host.getAttribute("data-loaded")==="1") return;
+    host.setAttribute("data-base-url", "/setup/roles");
+    await wmEmbedLoadIntoHost(host, "/setup/roles", ["/setup/roles"]);
+  }
+
+  function wmEnsureUsersGroupsActivePaneLoaded(){
+    var ugPanel = document.querySelector('.wm-subtabpanel[data-panel="usersgroups"]');
+    if(!ugPanel || ugPanel.hidden) return;
+
+    var active = ugPanel.querySelector('.wm-subtabs[data-wm-subtabs="setup-usersgroups"] .wm-subtabpanel[data-panel]:not([hidden])');
+    if(!active) return;
+
+    var key = active.getAttribute("data-panel") || "";
+    if(key === "users") wmLoadUsersIntoTab();
+    if(key === "groups") wmLoadGroupsIntoTab();
+    if(key === "roles") wmLoadRolesIntoTab();
+  }
+
+  // When Users/Groups is activated (or its subtabs), load the active pane content.
+  document.addEventListener("click", function(ev){
+    var mainBtn = ev.target.closest('.wm-subtabs[data-wm-subtabs="setup-main"] .wm-tabbtn[data-tab="usersgroups"]');
+    var subBtn  = ev.target.closest('.wm-subtabs[data-wm-subtabs="setup-usersgroups"] .wm-tabbtn[data-tab]');
+    if(mainBtn || subBtn){
+      setTimeout(wmEnsureUsersGroupsActivePaneLoaded, 0);
+    }
+  });
+
+  // If we land on Users/Groups (restored from localStorage), load immediately.
+  setTimeout(function(){
+    wmEnsureUsersGroupsActivePaneLoaded();
+  }, 0);
+
+  // When the System Settings tab is activated, load it.
+  document.addEventListener("click", function(ev){
+    const btn = ev.target.closest('.wm-subtabs[data-wm-subtabs="setup-main"] .wm-tabbtn[data-tab="system"]');
+    if(btn) {
+      // Let the existing tab code flip the panel first.
+      setTimeout(wmLoadSystemSettingsIntoTab, 0);
+    }
+  });
+
+  // If we land on the system tab (restored from localStorage), load immediately.
+  setTimeout(function(){
+    const systemPanel = document.querySelector('.wm-subtabpanel[data-panel="system"]');
+    if(systemPanel && !systemPanel.hidden) wmLoadSystemSettingsIntoTab();
+  }, 0);
+
+</script>

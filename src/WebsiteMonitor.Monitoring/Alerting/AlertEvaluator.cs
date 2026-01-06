@@ -1,6 +1,9 @@
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
+using System.Text;
+using System.Net;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -116,6 +119,7 @@ public sealed class AlertEvaluator
                     db,
                     emailConfigured, smtpSender, smtpSettings, smtpPasswordPlain, recipientEmails,
                     webhooksConfigured, webhookSender, webhookUrls,
+                    tz,
                     instanceId, target, s, nowUtc, ct);
             }
         }
@@ -164,14 +168,16 @@ public sealed class AlertEvaluator
         if (state.DownFirstNotifiedUtc == null &&
             downAge >= TimeSpan.FromSeconds(_opt.DownAfterSeconds))
         {
+            var downBodyText = await BuildDownBodyAsync(db, instanceId, target, state, downStartUtc, tz, _opt.PublicBaseUrl, ct);
+
             var notified = await NotifyAsync(
                 db,
                 "AlertDown",
                 emailConfigured, smtpSender, smtpSettings, smtpPasswordPlain, recipientEmails,
                 webhooksConfigured, webhookSender, webhookUrls,
                 instanceId, target, state, nowUtc,
-                subject: $"DOWN {target.Url}",
-                bodyText: BuildDownBody(instanceId, target, state, downStartUtc, nowUtc, tz),
+                subject: "Website Check FAILED!",
+                bodyText: downBodyText,
                 ct: ct);
 
             if (!notified)
@@ -202,14 +208,16 @@ public sealed class AlertEvaluator
             state.NextNotifyUtc != null &&
             nowUtc >= state.NextNotifyUtc.Value)
         {
+            var downBodyText = await BuildDownBodyAsync(db, instanceId, target, state, downStartUtc, tz, _opt.PublicBaseUrl, ct);
+
             var notified = await NotifyAsync(
                 db,
                 "AlertDownRepeat",
                 emailConfigured, smtpSender, smtpSettings, smtpPasswordPlain, recipientEmails,
                 webhooksConfigured, webhookSender, webhookUrls,
                 instanceId, target, state, nowUtc,
-                subject: $"DOWN (repeat) {target.Url}",
-                bodyText: BuildDownBody(instanceId, target, state, downStartUtc, nowUtc, tz),
+                subject: "Website Check FAILED! (repeat)",
+                bodyText: downBodyText,
                 ct: ct);
 
             if (!notified)
@@ -244,6 +252,7 @@ public sealed class AlertEvaluator
         bool webhooksConfigured,
         IWebhookSender webhookSender,
         List<string> webhookUrls,
+        TimeZoneInfo tz,
         string instanceId,
         Target target,
         TargetState state,
@@ -267,14 +276,16 @@ public sealed class AlertEvaluator
         if (nowUtc < state.RecoveredDueUtc.Value)
             return;
 
+        var recoveredBodyText = await BuildRecoveredBodyAsync(db, instanceId, target, state, tz, _opt.PublicBaseUrl, ct);
+
         var notified = await NotifyAsync(
             db,
             "AlertRecovered",
             emailConfigured, smtpSender, smtpSettings, smtpPasswordPlain, recipientEmails,
             webhooksConfigured, webhookSender, webhookUrls,
             instanceId, target, state, nowUtc,
-            subject: $"RECOVERED {target.Url}",
-            bodyText: BuildRecoveredBody(instanceId, target, state, nowUtc),
+            subject: "Website Check SUCCESSFUL",
+            bodyText: recoveredBodyText,
             ct: ct);
 
         if (!notified)
@@ -427,36 +438,343 @@ public sealed class AlertEvaluator
         return anyOk;
     }
 
-    private static string BuildDownBody(string instanceId, Target target, TargetState state, DateTime downStartUtc, DateTime nowUtc, TimeZoneInfo tz)
+        private static async Task<string> BuildDownBodyAsync(
+        WebsiteMonitorDbContext db,
+        string instanceId,
+        Target target,
+        TargetState state,
+        DateTime downStartUtc,
+        TimeZoneInfo tz,
+    string? publicBaseUrl,
+        CancellationToken ct)
     {
-        var downFor = nowUtc - downStartUtc;
-        var downStartLocal = TimeZoneInfo.ConvertTimeFromUtc(downStartUtc, tz);
+        var lastCheck = await db.Checks
+            .Where(c => c.TargetId == target.TargetId)
+            .OrderByDescending(c => c.TimestampUtc)
+            .FirstOrDefaultAsync(ct);
 
-        return
-$@"Instance: {instanceId}
-URL: {target.Url}
+        // Try to show when this target was last known UP (from the most recent recovered alert event)
+        var upSinceUtc = await GetLastUtcFromEventAsync(
+            db, instanceId, target.TargetId,
+            types: new[] { "AlertRecovered" },
+            marker: "up since ",
+            ct);
 
-Down since (UTC): {downStartUtc:u}
-Down since (local): {downStartLocal:yyyy-MM-dd HH:mm:ss}
-Down duration: {downFor}
+        
+        var ssPublicBaseUrl = await TryGetPublicBaseUrlFromSystemSettingsAsync(db, ct);
+        var effectivePublicBaseUrl = !string.IsNullOrWhiteSpace(ssPublicBaseUrl) ? ssPublicBaseUrl : publicBaseUrl;
 
-Consecutive failures: {state.ConsecutiveFailures}
-Last summary: {state.LastSummary}";
+        return BuildAlertHtmlBody(
+            title: "ITWebsiteMonitor detected a Failed check",
+            instanceId: instanceId,
+            isUp: false,
+            publicBaseUrl: effectivePublicBaseUrl,
+            target: target,
+            state: state,
+            lastCheck: lastCheck,
+            downSinceUtc: downStartUtc,
+            upSinceUtc: upSinceUtc,
+            tz: tz);
+}
+
+    private static async Task<string> BuildRecoveredBodyAsync(
+        WebsiteMonitorDbContext db,
+        string instanceId,
+        Target target,
+        TargetState state,
+        TimeZoneInfo tz,
+    string? publicBaseUrl,
+        CancellationToken ct)
+    {
+        var lastCheck = await db.Checks
+            .Where(c => c.TargetId == target.TargetId)
+            .OrderByDescending(c => c.TimestampUtc)
+            .FirstOrDefaultAsync(ct);
+
+        // Try to show when this outage started (from the most recent DOWN alert event)
+        var downSinceUtc = await GetLastUtcFromEventAsync(
+            db, instanceId, target.TargetId,
+            types: new[] { "AlertDownFirst", "AlertDownRepeat" },
+            marker: "down since ",
+            ct);
+
+        var ssPublicBaseUrl = await TryGetPublicBaseUrlFromSystemSettingsAsync(db, ct);
+        var effectivePublicBaseUrl = !string.IsNullOrWhiteSpace(ssPublicBaseUrl) ? ssPublicBaseUrl : publicBaseUrl;
+
+        return BuildAlertHtmlBody(
+            title: "ITWebsiteMonitor detected a Successful check",
+            instanceId: instanceId,
+            isUp: true,
+            publicBaseUrl: effectivePublicBaseUrl,
+            target: target,
+            state: state,
+            lastCheck: lastCheck,
+            downSinceUtc: downSinceUtc,
+            upSinceUtc: state.StateSinceUtc,
+            tz: tz);
+}
+
+    private static async Task<DateTime?> GetLastUtcFromEventAsync(
+        WebsiteMonitorDbContext db,
+        string instanceId,
+        long targetId,
+        string[] types,
+        string marker,
+        CancellationToken ct)
+    {
+        var msg = await db.Events
+            .Where(e => e.InstanceId == instanceId && e.TargetId == targetId && types.Contains(e.Type))
+            .OrderByDescending(e => e.TimestampUtc)
+            .Select(e => e.Message)
+            .FirstOrDefaultAsync(ct);
+
+        return TryParseUtcAfterMarker(msg, marker);
     }
 
-    private static string BuildRecoveredBody(string instanceId, Target target, TargetState state, DateTime nowUtc)
+    private static DateTime? TryParseUtcAfterMarker(string? message, string marker)
     {
-        var upSinceUtc = state.StateSinceUtc;
-        var upFor = nowUtc - upSinceUtc;
+        if (string.IsNullOrWhiteSpace(message)) return null;
 
-        return
-$@"Instance: {instanceId}
-URL: {target.Url}
+        var i = message.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (i < 0) return null;
 
-Up since (UTC): {upSinceUtc:u}
-Up duration: {upFor}
+        i += marker.Length;
+        var end = message.IndexOf(')', i);
+        if (end < 0) end = message.Length;
 
-Last summary: {state.LastSummary}";
+        var raw = message.Substring(i, end - i).Trim();
+
+        // Event messages use DateTime.ToString("u"), which ends with 'Z'
+        if (DateTime.TryParseExact(
+                raw,
+                "yyyy-MM-dd HH:mm:ss'Z'",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out var dt))
+        {
+            return dt;
+        }
+
+        if (DateTime.TryParse(
+                raw,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out dt))
+        {
+            return dt;
+        }
+
+        return null;
+    }
+
+        
+    private static async Task<string?> TryGetPublicBaseUrlFromSystemSettingsAsync(WebsiteMonitorDbContext db, CancellationToken ct)
+    {
+        try
+        {
+            return await db.SystemSettings.AsNoTracking()
+                .Where(s => s.Id == 1)
+                .Select(s => s.PublicBaseUrl)
+                .FirstOrDefaultAsync(ct);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+private static string? NormalizePublicBaseUrl(string? publicBaseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(publicBaseUrl))
+            return null;
+
+        return publicBaseUrl.Trim().TrimEnd('/');
+    }
+
+    private static string BuildAlertHtmlBody(
+        string title,
+        string instanceId,
+        bool isUp,
+        string? publicBaseUrl,
+        Target target,
+        TargetState state,
+        Check? lastCheck,
+        DateTime? downSinceUtc,
+        DateTime? upSinceUtc,
+        TimeZoneInfo tz)
+    {
+        static string H(string? s) => WebUtility.HtmlEncode(s ?? string.Empty);
+
+        static string Link(string url, string? displayText = null)
+        {
+            var t = displayText ?? url;
+            return $"<a href=\"{H(url)}\" style=\"color:#6ab0ff; text-decoration:underline;\">{H(t)}</a>";
+        }
+
+        static void Row(StringBuilder sb, string label, string valueHtml)
+        {
+            sb.Append("<tr>");
+            sb.Append("<td style=\"background:#4f86d9; color:#ffffff; font-weight:700; padding:10px 12px; border:1px solid #6f6f6f; width:180px; vertical-align:top;\">");
+            sb.Append(H(label));
+            sb.Append("</td>");
+            sb.Append("<td style=\"background:transparent; padding:10px 12px; border:1px solid #6f6f6f; vertical-align:top;\">");
+            sb.Append(valueHtml);
+            sb.Append("</td>");
+            sb.Append("</tr>");
+        }
+
+        var baseUrl = NormalizePublicBaseUrl(publicBaseUrl) ?? "http://localhost:5041";
+        var homeUrl = baseUrl + "/";
+        var logoUrl = baseUrl + "/images/itgreatfalls-logo.png";
+
+        var instanceHomeUrl = homeUrl;
+        if (!string.IsNullOrWhiteSpace(instanceId))
+        {
+            instanceHomeUrl = homeUrl + "?instanceId=" + Uri.EscapeDataString(instanceId);
+        }
+
+        var port = GetTcpPort(target.Url);
+        var usedIp = lastCheck?.UsedIp ?? state.LastUsedIp ?? string.Empty;
+        var finalUrl = lastCheck?.FinalUrl ?? state.LastFinalUrl ?? target.Url;
+        var httpCode = lastCheck?.HttpStatusCode;
+        var loginType = lastCheck?.DetectedLoginType ?? state.LastDetectedLoginType ?? string.Empty;
+
+        var tcpOk = lastCheck?.TcpOk ?? state.LastSummary.Contains("TCP OK", StringComparison.OrdinalIgnoreCase);
+        var httpOk = lastCheck?.HttpOk ?? state.LastSummary.Contains("HTTP OK", StringComparison.OrdinalIgnoreCase);
+        var loginDetected = lastCheck?.LoginDetected ?? state.LoginDetectedLast;
+
+        var tcpValue = tcpOk
+            ? (string.IsNullOrWhiteSpace(usedIp) ? "OK" : $"OK ({usedIp})")
+            : "FAILED";
+
+        var httpValue = httpOk
+            ? (httpCode.HasValue ? httpCode.Value.ToString(CultureInfo.InvariantCulture) : "OK")
+            : (httpCode.HasValue ? $"FAIL ({httpCode.Value})" : "FAIL (no code)");
+
+        var loginValue = loginDetected
+            ? (string.IsNullOrWhiteSpace(loginType) ? "Detected" : $"Detected ({loginType})")
+            : (string.IsNullOrWhiteSpace(loginType) ? "Not detected" : $"Not detected ({loginType})");
+
+        var detailsText = $"TCP: {tcpValue}\nHTTP: {httpValue}\nLogin: {loginValue}";
+        var detailsHtml = $"<div style=\"white-space:pre-line;\">{H(detailsText)}</div>";
+
+        var result = isUp ? "SUCCESSFUL" : "FAILED";
+
+        var tcpMs = lastCheck?.TcpLatencyMs;
+        var httpMs = lastCheck?.HttpLatencyMs;
+        int? totalMs = (tcpMs.HasValue || httpMs.HasValue) ? (tcpMs ?? 0) + (httpMs ?? 0) : null;
+
+        var sb = new StringBuilder();
+
+        // NOTE: Email client support varies. Use a table-based wrapper + bgcolor for reliable dark backgrounds
+        // across Outlook/Word rendering and clients that ignore <body> background styles.
+        sb.Append("<!doctype html><html><head>");
+        sb.Append("<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\"> ");
+        // Dark-mode hints (not honored by all clients)
+        sb.Append("<meta name=\"color-scheme\" content=\"dark light\"> ");
+        sb.Append("<meta name=\"supported-color-schemes\" content=\"dark light\"> ");
+        sb.Append("</head><body style=\"margin:0; padding:0; background:transparent; font-family:Segoe UI, Arial, sans-serif; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%;\">");
+
+        // Outer wrapper enforces background + padding
+        sb.Append("<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"background:transparent;\">");
+        sb.Append("<tr><td align=\"center\" style=\"padding:18px;\">");
+        sb.Append("<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"max-width:1200px;\">");
+
+        // Header
+        sb.Append("<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin-bottom:14px;\"><tr>");
+        if (logoUrl != null)
+        {
+            sb.Append("<td style=\"width:75px; padding-right:12px; vertical-align:middle;\">");
+            sb.Append($"<a href=\"{H(instanceHomeUrl)}\" style=\"display:inline-block; text-decoration:none;\">");
+            sb.Append($"<img src=\"{H(logoUrl)}\" width=\"75\" height=\"75\" style=\"display:block; border-radius:6px;\">");
+            sb.Append("</a>");
+            sb.Append("</td>");
+        }
+
+        sb.Append("<td style=\"vertical-align:middle;\">");
+        sb.Append($"<a href=\"{H(instanceHomeUrl)}\" style=\"color:inherit; text-decoration:none;\">");
+        sb.Append($"<div style=\"font-size:20px; font-weight:700; line-height:1.2;\">{H(title)}</div>");
+        sb.Append("</a>");
+        sb.Append("</td>");
+
+        sb.Append("<td style=\"text-align:right; vertical-align:middle;\">");
+        if (homeUrl != null)
+        {
+            sb.Append($"<a href=\"{H(instanceHomeUrl)}\" style=\"color:#6ab0ff; font-size:14px; text-decoration:underline;\">Open Home Page</a>");
+        }
+        sb.Append("</td>");
+
+        sb.Append("</tr></table>");
+
+        // Details table
+        sb.Append("<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse; border:1px solid #6f6f6f;\">");
+
+        // URL
+        var urlValue = Uri.TryCreate(target.Url, UriKind.Absolute, out _)
+            ? Link(target.Url)
+            : H(target.Url);
+        Row(sb, "URL", urlValue);
+
+        // TCP
+        Row(sb, $"TCP {port}", H(tcpValue));
+
+        // Details
+        Row(sb, "Details", detailsHtml);
+
+        // Resolved IPs
+        Row(sb, "Resolved IPs", string.IsNullOrWhiteSpace(usedIp) ? "-" : H(usedIp));
+
+        // Result
+        Row(sb, "Result", H(result));
+
+        // HTTP
+        Row(sb, "HTTP", H(httpValue));
+
+        // Final URL
+        var finalUrlValue = Uri.TryCreate(finalUrl, UriKind.Absolute, out _)
+            ? Link(finalUrl)
+            : H(finalUrl);
+        Row(sb, "Final URL", finalUrlValue);
+
+        // ms
+        if (totalMs.HasValue)
+            Row(sb, "ms", H(totalMs.Value.ToString(CultureInfo.InvariantCulture)));
+
+        // Down Since / Up Since
+        if (downSinceUtc.HasValue)
+            Row(sb, "Down Since", H(FormatLocal(downSinceUtc.Value, tz)));
+
+        if (!string.IsNullOrWhiteSpace(loginType))
+            Row(sb, "Check", H(loginType));
+
+        if (upSinceUtc.HasValue)
+            Row(sb, "Up Since", H(FormatLocal(upSinceUtc.Value, tz)));
+
+        sb.Append("</table>");
+
+        // Close wrapper tables
+        sb.Append("</table>");
+        sb.Append("</td></tr></table>");
+        sb.Append("</body></html>");
+
+        return sb.ToString();
+    }
+
+private static int GetTcpPort(string url)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            if (!uri.IsDefaultPort) return uri.Port;
+            return uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase) ? 443 : 80;
+        }
+
+        return 443;
+    }
+
+    private static string FormatLocal(DateTime utc, TimeZoneInfo tz)
+    {
+        var local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), tz);
+        return local.ToString("ddd MM/dd/yyyy HH:mm:ss", CultureInfo.InvariantCulture);
     }
 
     private DateTime ComputeNextDownNotifyUtc(DateTime downStartUtc, DateTime lastSentUtc, TimeZoneInfo tz, DateTime nowUtc)
@@ -487,7 +805,7 @@ Last summary: {state.LastSummary}";
         return candidateUtc;
     }
 
-    private async Task SaveChangesWithGateRetryAsync(WebsiteMonitorDbContext db, CancellationToken ct)
+private async Task SaveChangesWithGateRetryAsync(WebsiteMonitorDbContext db, CancellationToken ct)
     {
         for (var attempt = 1; ; attempt++)
         {

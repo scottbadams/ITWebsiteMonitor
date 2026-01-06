@@ -3,47 +3,77 @@
 @attribute [Authorize(Roles = "Admin")]
 @model WebsiteMonitor.App.Pages.Setup.Targets.IndexModel
 
-<h1>Targets for @Model.InstanceId</h1>
+@{
+  ViewData["Title"] = $"Targets - {Model.InstanceId}";
 
-<p>
-  <a href="/setup/instances/@Model.InstanceId">Back to Instance</a>
-  | <a href="/setup/instances/@Model.InstanceId/targets/new">Add Target</a>
-</p>
+  var q = ViewContext?.HttpContext?.Request?.Query;
+  var embedVal = q?["embed"].ToString();
+  var isEmbed =
+    string.Equals(embedVal, "1", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(embedVal, "true", StringComparison.OrdinalIgnoreCase);
 
-<table border="1" cellpadding="6" cellspacing="0">
+  var zVal = (q?["z"].ToString() ?? "").Trim();
+  var isZabbixChild =
+    string.Equals(zVal, "1", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(zVal, "true", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(zVal, "yes", StringComparison.OrdinalIgnoreCase);
+
+  var schemeRaw = (q?["scheme"].ToString() ?? "").Trim();
+  var schemeParam = (schemeRaw ?? "").Trim().ToLowerInvariant();
+  var schemeIsValid = schemeParam == "light" || schemeParam == "dark";
+
+  var qs = new System.Collections.Generic.List<string>();
+  if (isEmbed) qs.Add("embed=1");
+  if (isZabbixChild) qs.Add("z=1");
+  if (schemeIsValid) qs.Add("scheme=" + schemeParam);
+  var embedSuffix = qs.Count > 0 ? ("?" + string.Join("&", qs)) : "";
+}
+
+@if (!isEmbed)
+{
+  <div class="wm-actions" style="margin-bottom:10px;">
+    <a class="wm-btn" href="/setup">Back to Setup</a>
+    <a class="wm-btn" href="/setup/instances/@Model.InstanceId#targets">Back to Instance</a>
+  </div>
+}
+
+<div class="wm-actions" style="margin-bottom:10px;">
+  <a class="wm-btn" href="/setup/instances/@Model.InstanceId/targets/new@embedSuffix">Add Target</a>
+</div>
+
+<table class="wm-table">
   <thead>
     <tr>
-      <th>ID</th>
-      <th>Enabled</th>
+      <th style="width:1%; white-space:nowrap;">ID</th>
+      <th style="width:1%; text-align:center; white-space:nowrap;">Enabled</th>
       <th>URL</th>
-      <th>LoginRule</th>
-      <th>Expected HTTP</th>
-      <th>Actions</th>
+      <th style="width:1%; white-space:nowrap;">Login Rule</th>
+      <th style="width:1%; white-space:nowrap;">HTTP Min</th>
+      <th style="width:1%; white-space:nowrap;">HTTP Max</th>
+      <th style="width:1%; white-space:nowrap;">Actions</th>
     </tr>
   </thead>
   <tbody>
-@foreach (var t in Model.Rows)
-{
+  @foreach (var r in Model.Rows)
+  {
     <tr>
-      <td>@t.TargetId</td>
-      <td>@t.Enabled</td>
-      <td>@t.Url</td>
-      <td>@(t.LoginRule ?? "")</td>
-      <td>@t.HttpMin - @t.HttpMax</td>
-      <td>
-        <form method="post" asp-page-handler="Toggle" style="display:inline;">
-          @Html.AntiForgeryToken()
-          <input type="hidden" name="targetId" value="@t.TargetId" />
-          <button type="submit">Toggle</button>
+      <td>@r.TargetId</td>
+      <td style="text-align:center;">@(r.Enabled ? "Yes" : "No")</td>
+      <td style="word-break:break-all;">@r.Url</td>
+      <td>@(string.IsNullOrWhiteSpace(r.LoginRule) ? "-" : r.LoginRule)</td>
+      <td>@(r.HttpMin?.ToString() ?? "-")</td>
+      <td>@(r.HttpMax?.ToString() ?? "-")</td>
+      <td style="white-space:nowrap;">
+        <form method="post" asp-page-handler="Toggle" asp-route-instanceId="@Model.InstanceId" asp-route-targetId="@r.TargetId" asp-route-embed="@(isEmbed ? "1" : null)" asp-route-z="@(isZabbixChild ? "1" : null)" asp-route-scheme="@(schemeIsValid ? schemeParam : null)" style="display:inline;">
+          <button class="wm-btn" type="submit">@(r.Enabled ? "Disable" : "Enable")</button>
         </form>
 
-        <form method="post" asp-page-handler="Delete" style="display:inline;" onsubmit="return confirm('Delete this target?');">
-          @Html.AntiForgeryToken()
-          <input type="hidden" name="targetId" value="@t.TargetId" />
-          <button type="submit">Delete</button>
+        <form method="post" asp-page-handler="Delete" asp-route-instanceId="@Model.InstanceId" asp-route-targetId="@r.TargetId" asp-route-embed="@(isEmbed ? "1" : null)" asp-route-z="@(isZabbixChild ? "1" : null)" asp-route-scheme="@(schemeIsValid ? schemeParam : null)" style="display:inline;"
+              onsubmit="return confirm('Delete target @r.TargetId?');">
+          <button class="wm-btn" type="submit">Delete</button>
         </form>
       </td>
     </tr>
-}
+  }
   </tbody>
 </table>

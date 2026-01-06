@@ -1,0 +1,93 @@
+@page "/setup/systemsettings"
+@model WebsiteMonitor.App.Pages.Setup.SystemSettings.IndexModel
+@{
+  ViewData["Title"] = "System Settings";
+}
+
+@section PageActions {
+  <a class="wm-btn" href="/setup">Back to Setup</a>
+}
+
+<h1>System Settings</h1>
+
+@if (!string.IsNullOrWhiteSpace(Model.Error))
+{
+  <p class="wm-meta" style="color:#b00;">@Model.Error</p>
+}
+
+<form method="post">
+  <table class="wm-formtable">
+    <tr>
+      <td style="padding-right:10px; white-space:nowrap;"><label for="LogoPath">Logo path / URL</label></td>
+      <td>
+        <input id="LogoPath" type="text" name="LogoPath" value="@Model.Input.LogoPath" style="width:560px;" placeholder="~/images/itgreatfalls-logo.png" />
+        <div class="wm-meta">Example: <code>~/images/itgreatfalls-logo.png</code> or <code>/images/logo.png</code></div>
+      </td>
+    </tr>
+
+    <tr>
+      <td style="padding-right:10px; white-space:nowrap;"><label for="PublicBaseUrl">Public base URL</label></td>
+      <td>
+        <input id="PublicBaseUrl" type="text" name="PublicBaseUrl" value="@Model.Input.PublicBaseUrl" style="width:560px;" placeholder="http://localhost:5041" />
+        <div class="wm-meta">Used for links in alert emails and snapshot HTML. Leave blank to default to <code>http://localhost:5041</code>.</div>
+      </td>
+    </tr>
+
+    <tr>
+      <td style="padding-right:10px; white-space:nowrap;"><label for="AllowNetworkAccess">Allow network access</label></td>
+      <td>
+        <label style="display:inline-flex; align-items:center; gap:8px;">
+          <input id="AllowNetworkAccess" type="checkbox" name="AllowNetworkAccess" value="true" @(Model.Input.AllowNetworkAccess ? "checked" : "") />
+          <span>Allow access from non-local clients</span>
+        </label>
+        <div class="wm-meta">When unchecked, only <code>localhost</code> can access the web UI.</div>
+      </td>
+    </tr>
+
+
+    <tr>
+      <td style="padding-right:10px; white-space:nowrap;"><label for="DefaultTimeZoneId">Default time zone</label></td>
+      <td>
+        <select id="DefaultTimeZoneId" name="DefaultTimeZoneId" style="width:560px;">
+          <option value="">(not set)</option>
+          @foreach (var tz in Model.TimeZones)
+        {
+            if (Model.Input.DefaultTimeZoneId == tz.Id)
+            {
+                <option value="@tz.Id" selected>@tz.DisplayName (@tz.Id)</option>
+            }
+            else
+            {
+                <option value="@tz.Id">@tz.DisplayName (@tz.Id)</option>
+            }
+        }
+        </select>
+      </td>
+    </tr>
+
+    <tr>
+      <td style="padding-right:10px; white-space:nowrap;"><label for="DefaultCheckIntervalSeconds">Default check interval (seconds)</label></td>
+      <td><input id="DefaultCheckIntervalSeconds" type="number" name="DefaultCheckIntervalSeconds" value="@Model.Input.DefaultCheckIntervalSeconds" min="1" style="width:160px;" /></td>
+    </tr>
+
+    <tr>
+      <td style="padding-right:10px; white-space:nowrap;"><label for="DefaultConcurrencyLimit">Default concurrency limit</label></td>
+      <td><input id="DefaultConcurrencyLimit" type="number" name="DefaultConcurrencyLimit" value="@Model.Input.DefaultConcurrencyLimit" min="1" style="width:160px;" /></td>
+    </tr>
+
+    <tr>
+      <td style="padding-right:10px; white-space:nowrap;"><label for="DefaultSnapshotOutputFolderTemplate">Default snapshot output folder template</label></td>
+      <td>
+        <input id="DefaultSnapshotOutputFolderTemplate" type="text" name="DefaultSnapshotOutputFolderTemplate" value="@Model.Input.DefaultSnapshotOutputFolderTemplate" style="width:560px;" placeholder="Snapshots/{instanceId}" />
+        <div class="wm-meta">Use <code>{instanceId}</code> as a placeholder.</div>
+      </td>
+    </tr>
+
+    <tr>
+      <td></td>
+      <td style="padding-top:10px;">
+        <button type="submit" class="wm-btn wm-primary">Save</button>
+      </td>
+    </tr>
+  </table>
+</form>

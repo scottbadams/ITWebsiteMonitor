@@ -56,6 +56,21 @@ public sealed class HtmlSnapshotHostedService : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<WebsiteMonitorDbContext>();
 
+        string baseUrl;
+        try
+        {
+            var configured = await db.SystemSettings.AsNoTracking()
+                .Where(s => s.Id == 1)
+                .Select(s => s.PublicBaseUrl)
+                .FirstOrDefaultAsync(ct);
+            baseUrl = NormalizeBaseUrl(configured);
+        }
+        catch
+        {
+            baseUrl = "http://localhost:5041";
+        }
+
+
         var instances = await db.Instances
             .AsNoTracking()
             .Where(i => i.Enabled && i.WriteHtmlSnapshot && i.OutputFolder != null && i.OutputFolder != "")
@@ -65,13 +80,7 @@ public sealed class HtmlSnapshotHostedService : BackgroundService
         {
             try
             {
-                await WriteOneInstanceSnapshotAsync(
-                    db,
-                    inst.InstanceId,
-                    inst.DisplayName,
-                    inst.TimeZoneId,
-                    inst.OutputFolder!,
-                    ct);
+                await WriteOneInstanceSnapshotAsync(db, inst.InstanceId, inst.DisplayName, inst.TimeZoneId, inst.OutputFolder!, baseUrl, ct);
             }
             catch (Exception ex)
             {
@@ -86,6 +95,7 @@ public sealed class HtmlSnapshotHostedService : BackgroundService
         string displayName,
         string? timeZoneId,
         string outputFolderRaw,
+        string baseUrl,
         CancellationToken ct)
     {
         // Relative -> under DataRoot. Absolute -> use as-is.
@@ -148,17 +158,24 @@ sb.AppendLine("<meta charset=\"utf-8\"/>");
 sb.AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"/>");
 sb.AppendLine("<meta name=\"color-scheme\" content=\"light dark\"/>");
 sb.AppendLine($"<title>ITWebsiteMonitor - Snapshot - {Html(displayName)}</title>");
-sb.AppendLine("<link rel=\"stylesheet\" href=\"/css/site.css\" />");
+sb.AppendLine($"<link rel=\"stylesheet\" href=\"{HtmlAttr(baseUrl)}/css/site.css\" />");
+sb.AppendLine("<style>.wm-iframe-only{display:none!important} body.wm-in-iframe .wm-iframe-hide{display:none!important} body.wm-in-iframe .wm-iframe-only{display:inline-flex!important}</style>");
+sb.AppendLine("<script>(function(){var framed=false;try{framed=window.self!==window.top;}catch(e){framed=true;}if(!framed)return;document.addEventListener(\"DOMContentLoaded\",function(){document.body.classList.add(\"wm-in-iframe\");var t=document.getElementById(\"wm-snap-title\");if(t){var dn=t.getAttribute(\"data-displayname\")||\"\";t.textContent=\"Snapshot - \"+dn;}});})();</script>");
 sb.AppendLine("</head><body>");
 
 sb.AppendLine("<div class=\"wm-page\">");
 sb.AppendLine("<div class=\"wm-topbar\">");
-sb.AppendLine($"<h1 class=\"wm-topbar-title\">ITWebsiteMonitor - Snapshot - {Html(displayName)}</h1>");
+sb.AppendLine("<div class=\"wm-topbar-title\">");
+sb.AppendLine($"<img class=\"wm-logo wm-iframe-hide\" src=\"{HtmlAttr(baseUrl)}/images/itgreatfalls-logo.png\" alt=\"Logo\" />");
+sb.AppendLine($"<span id=\"wm-snap-title\" data-displayname=\"{HtmlAttr(displayName)}\">ITWebsiteMonitor - Snapshot - {Html(displayName)}</span>");
+sb.AppendLine("</div>");
 sb.AppendLine("<div class=\"wm-topbar-actions\">");
-sb.AppendLine("<a class=\"wm-btn\" href=\"/\">Home</a>");
-sb.AppendLine($"<a class=\"wm-btn\" href=\"/monitor/{HtmlAttr(instanceId)}\">Monitor</a>");
-sb.AppendLine("<a class=\"wm-btn\" href=\"/setup\">Setup</a>");
-sb.AppendLine("<a class=\"wm-btn\" href=\"/account/logout\" target=\"_top\" rel=\"noopener noreferrer\">Log Out</a>");
+sb.AppendLine($"<a class=\"wm-btn wm-iframe-hide\" href=\"{HtmlAttr(baseUrl)}/\">Home</a>");
+sb.AppendLine($"<a class=\"wm-btn wm-iframe-hide\" href=\"{HtmlAttr(baseUrl)}/monitor/{HtmlAttr(instanceId)}\">Monitor</a>");
+sb.AppendLine($"<a class=\"wm-btn wm-iframe-hide\" href=\"{HtmlAttr(baseUrl)}/setup\">Setup</a>");
+sb.AppendLine($"<a class=\"wm-btn wm-iframe-hide\" href=\"{HtmlAttr(baseUrl)}/Account/Logout\" target=\"_top\" rel=\"noopener noreferrer\">Log Out</a>");
+sb.AppendLine("<button class=\"wm-btn wm-iframe-hide\" type=\"button\" onclick=\"window.close()\">Close</button>");
+sb.AppendLine("<button class=\"wm-btn wm-iframe-only\" type=\"button\" onclick=\"history.back()\">Back</button>");
 sb.AppendLine("</div></div>");
 
 sb.AppendLine("<p class=\"wm-meta\">");
@@ -230,6 +247,7 @@ sb.AppendLine("</p>");
                 instanceId,
                 tzLabel,
                 tz,
+                baseUrl,
                 t.Url,
                 finalUrl,
                 stateText,
@@ -253,6 +271,7 @@ sb.AppendLine("</p>");
         string instanceId,
         string tzLabel,
         TimeZoneInfo tz,
+        string baseUrl,
         string url,
         string finalUrl,
         string stateText,
@@ -268,17 +287,24 @@ sb.AppendLine("<meta charset=\"utf-8\"/>");
 sb.AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"/>");
 sb.AppendLine("<meta name=\"color-scheme\" content=\"light dark\"/>");
 sb.AppendLine($"<title>ITWebsiteMonitor - Snapshot - {Html(displayName)}</title>");
-sb.AppendLine("<link rel=\"stylesheet\" href=\"/css/site.css\" />");
+sb.AppendLine($"<link rel=\"stylesheet\" href=\"{HtmlAttr(baseUrl)}/css/site.css\" />");
+sb.AppendLine("<style>.wm-iframe-only{display:none!important} body.wm-in-iframe .wm-iframe-hide{display:none!important} body.wm-in-iframe .wm-iframe-only{display:inline-flex!important}</style>");
+sb.AppendLine("<script>(function(){var framed=false;try{framed=window.self!==window.top;}catch(e){framed=true;}if(!framed)return;document.addEventListener(\"DOMContentLoaded\",function(){document.body.classList.add(\"wm-in-iframe\");var t=document.getElementById(\"wm-snap-title\");if(t){var dn=t.getAttribute(\"data-displayname\")||\"\";t.textContent=\"Snapshot - \"+dn;}});})();</script>");
 sb.AppendLine("</head><body>");
 
 sb.AppendLine("<div class=\"wm-page\">");
 sb.AppendLine("<div class=\"wm-topbar\">");
-sb.AppendLine($"<h1 class=\"wm-topbar-title\">ITWebsiteMonitor - Snapshot - {Html(displayName)}</h1>");
+sb.AppendLine("<div class=\"wm-topbar-title\">");
+sb.AppendLine($"<img class=\"wm-logo wm-iframe-hide\" src=\"{HtmlAttr(baseUrl)}/images/itgreatfalls-logo.png\" alt=\"Logo\" />");
+sb.AppendLine($"<span id=\"wm-snap-title\" data-displayname=\"{HtmlAttr(displayName)}\">ITWebsiteMonitor - Snapshot - {Html(displayName)}</span>");
+sb.AppendLine("</div>");
 sb.AppendLine("<div class=\"wm-topbar-actions\">");
-sb.AppendLine("<a class=\"wm-btn\" href=\"/\">Home</a>");
-sb.AppendLine($"<a class=\"wm-btn\" href=\"/monitor/{HtmlAttr(instanceId)}\">Monitor</a>");
-sb.AppendLine("<a class=\"wm-btn\" href=\"/setup\">Setup</a>");
-sb.AppendLine("<a class=\"wm-btn\" href=\"/account/logout\" target=\"_top\" rel=\"noopener noreferrer\">Log Out</a>");
+sb.AppendLine($"<a class=\"wm-btn wm-iframe-hide\" href=\"{HtmlAttr(baseUrl)}/\">Home</a>");
+sb.AppendLine($"<a class=\"wm-btn wm-iframe-hide\" href=\"{HtmlAttr(baseUrl)}/monitor/{HtmlAttr(instanceId)}\">Monitor</a>");
+sb.AppendLine($"<a class=\"wm-btn wm-iframe-hide\" href=\"{HtmlAttr(baseUrl)}/setup\">Setup</a>");
+sb.AppendLine($"<a class=\"wm-btn wm-iframe-hide\" href=\"{HtmlAttr(baseUrl)}/Account/Logout\" target=\"_top\" rel=\"noopener noreferrer\">Log Out</a>");
+sb.AppendLine("<button class=\"wm-btn wm-iframe-hide\" type=\"button\" onclick=\"window.close()\">Close</button>");
+sb.AppendLine("<button class=\"wm-btn wm-iframe-only\" type=\"button\" onclick=\"history.back()\">Back</button>");
 sb.AppendLine("</div></div>");
 
 sb.AppendLine($"<p class=\"wm-meta\">{Html(url)}</p>");
@@ -350,7 +376,16 @@ sb.AppendLine($"<tr class=\"{rowClass}\">");
         return local.ToString(SnapshotDateTimeFormat, CultureInfo.InvariantCulture);
     }
 
-    private static TimeZoneInfo ResolveTimeZone(string? timeZoneId, ILogger logger)
+    
+    private static string NormalizeBaseUrl(string? baseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(baseUrl))
+            return "http://localhost:5041";
+
+        return baseUrl.Trim().TrimEnd('/');
+    }
+
+private static TimeZoneInfo ResolveTimeZone(string? timeZoneId, ILogger logger)
     {
         if (string.IsNullOrWhiteSpace(timeZoneId))
             return TimeZoneInfo.Local;

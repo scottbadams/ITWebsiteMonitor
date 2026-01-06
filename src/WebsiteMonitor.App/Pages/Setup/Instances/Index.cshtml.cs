@@ -60,6 +60,38 @@ public sealed class IndexModel : PageModel
     public string? Error { get; set; }
     public string? Info { get; set; }
 
+
+    private static bool IsTruthy(string? value)
+    {
+        var v = (value ?? "").Trim();
+        return string.Equals(v, "1", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(v, "true", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(v, "yes", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string EmbedSuffix()
+    {
+        var q = Request?.Query;
+        if (q == null || q.Count == 0) return "";
+
+        var parts = new System.Collections.Generic.List<string>();
+
+        var embed = q["embed"].ToString();
+        if (IsTruthy(embed)) parts.Add("embed=1");
+
+        var z = q["z"].ToString();
+        if (IsTruthy(z)) parts.Add("z=1");
+
+        var scheme = (q["scheme"].ToString() ?? "").Trim();
+        if (string.Equals(scheme, "light", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(scheme, "dark", StringComparison.OrdinalIgnoreCase))
+        {
+            parts.Add("scheme=" + scheme.ToLowerInvariant());
+        }
+
+        return parts.Count == 0 ? "" : ("?" + string.Join("&", parts));
+    }
+
     public async Task<IActionResult> OnGetAsync()
     {
         if (string.IsNullOrWhiteSpace(InstanceId))
@@ -137,7 +169,7 @@ public sealed class IndexModel : PageModel
         if (!instance.Enabled)
             await _runtime.StopAsync(instance.InstanceId);
 
-        return Redirect($"/setup/instances/{InstanceId}");
+        return Redirect($"/setup/instances/{InstanceId}{EmbedSuffix()}");
     }
 
     // Saves SMTP settings + recipients. Returns back to same page.
@@ -236,7 +268,7 @@ public sealed class IndexModel : PageModel
 
         Info = "SMTP settings and recipients saved.";
         TempData["Flash"] = "SMTP settings and recipients saved.";
-		return Redirect($"/setup/instances/{InstanceId}");
+		return Redirect($"/setup/instances/{InstanceId}{EmbedSuffix()}");
     }
 
     // Saves SMTP settings, then opens the SMTP Test popup in a new window/tab.
@@ -254,18 +286,18 @@ public sealed class IndexModel : PageModel
     public async Task<IActionResult> OnPostStartAsync()
     {
         await _runtime.StartAsync(InstanceId);
-        return Redirect($"/setup/instances/{InstanceId}");
+        return Redirect($"/setup/instances/{InstanceId}{EmbedSuffix()}");
     }
 
     public async Task<IActionResult> OnPostStopAsync()
     {
         await _runtime.StopAsync(InstanceId);
-        return Redirect($"/setup/instances/{InstanceId}");
+        return Redirect($"/setup/instances/{InstanceId}{EmbedSuffix()}");
     }
 
     public async Task<IActionResult> OnPostRestartAsync()
     {
         await _runtime.RestartAsync(InstanceId);
-        return Redirect($"/setup/instances/{InstanceId}");
+        return Redirect($"/setup/instances/{InstanceId}{EmbedSuffix()}");
     }
 }

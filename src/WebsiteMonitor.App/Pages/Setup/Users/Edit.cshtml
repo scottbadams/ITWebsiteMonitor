@@ -1,0 +1,57 @@
+@page "/setup/users/{id}"
+@model WebsiteMonitor.App.Pages.Setup.Users.EditModel
+@{
+  ViewData["Title"] = "User";
+}
+
+@section PageActions {
+  <a class="wm-btn" href="/setup/users">Back</a>
+}
+
+<h1>User</h1>
+
+@if (!string.IsNullOrWhiteSpace(Model.Error))
+{
+  <p class="wm-meta" style="color:#b00;">@Model.Error</p>
+}
+
+@if (Model.UserEntity is null)
+{
+  <p class="wm-meta" style="color:#b00;">User not found.</p>
+}
+else
+{
+  <form method="post">
+    <input type="hidden" name="Id" value="@Model.UserEntity.Id" />
+
+    <table class="wm-formtable">
+      <tr>
+        <td style="padding-right:10px; white-space:nowrap;"><label for="Email">Email (required)</label></td>
+        <td><input id="Email" type="email" name="Email" value="@Model.UserEntity.Email" required style="width:420px;" /></td>
+      </tr>
+      <tr>
+        <td style="padding-right:10px; white-space:nowrap;"><label for="FullName">Full name</label></td>
+        <td><input id="FullName" type="text" name="FullName" value="@Model.UserEntity.FullName" style="width:420px;" /></td>
+      </tr>
+      <tr>
+        <td style="padding-right:10px; white-space:nowrap;"><label for="PhoneNumber">Phone</label></td>
+        <td><input id="PhoneNumber" type="tel" name="PhoneNumber" value="@Model.UserEntity.PhoneNumber" style="width:420px;" /></td>
+      </tr>
+      <tr>
+        <td></td>
+        <td>
+          <label>
+            <input type="checkbox" name="DarkThemeEnabled" value="true" @(Model.UserEntity.DarkThemeEnabled ? "checked" : "") />
+            Force dark theme
+          </label>
+        </td>
+      </tr>
+      <tr>
+        <td></td>
+        <td style="padding-top:10px;">
+          <button type="submit" class="wm-btn wm-primary">Save</button>
+        </td>
+      </tr>
+    </table>
+  </form>
+}

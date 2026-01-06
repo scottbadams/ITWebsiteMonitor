@@ -34,7 +34,16 @@ public sealed class MailKitSmtpSender : ISmtpSender
         msg.From.Add(MailboxAddress.Parse(settings.FromAddress));
         msg.To.Add(MailboxAddress.Parse(toEmail));
         msg.Subject = subject;
-        msg.Body = new TextPart("plain") { Text = bodyText };
+
+        // Backwards compatible: if the caller passes an HTML document, send it as HTML.
+        // Otherwise, send as plain text.
+        var isHtml = !string.IsNullOrWhiteSpace(bodyText) && (
+            bodyText.IndexOf("<!doctype html", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            bodyText.IndexOf("<html", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            bodyText.IndexOf("<table", StringComparison.OrdinalIgnoreCase) >= 0
+        );
+
+        msg.Body = new TextPart(isHtml ? "html" : "plain") { Text = bodyText };
 
         var opt = settings.SecurityMode switch
         {

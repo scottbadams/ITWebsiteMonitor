@@ -1,0 +1,72 @@
+@page "/setup/users"
+@model WebsiteMonitor.App.Pages.Setup.Users.IndexModel
+@{
+  ViewData["Title"] = "Users";
+}
+
+@section PageActions {
+  <a class="wm-btn" href="/setup">Back to Setup</a>
+  <a class="wm-btn wm-primary" href="/setup/users/new">Add User</a>
+}
+
+<h1>Users</h1>
+
+@if (!string.IsNullOrWhiteSpace(Model.Error))
+{
+  <p class="wm-meta" style="color:#b00;">@Model.Error</p>
+}
+
+<table class="wm-table" id="wmUsersTable">
+  <thead>
+    <tr>
+      <th class="wm-th-sortable" data-col="email">Email <span class="wm-sort">⇅</span></th>
+      <th class="wm-th-sortable" data-col="name">Full name <span class="wm-sort">⇅</span></th>
+      <th>Phone</th>
+      <th>Theme</th>
+      <th class="wm-cell-actions">Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+  @foreach (var u in Model.Users)
+  {
+    <tr>
+      <td>@u.Email</td>
+      <td>@u.FullName</td>
+      <td>@u.PhoneNumber</td>
+      <td>@(u.DarkThemeEnabled ? "Dark" : "Light")</td>
+      <td class="wm-cell-actions">
+        <a class="wm-btn" href="/setup/users/@u.Id">Configure</a>
+        <form method="post" asp-page-handler="Delete" asp-route-id="@u.Id" style="display:inline">
+          <button type="submit" class="wm-btn wm-danger" onclick="return confirm('Delete user: @u.Email ?');">Delete</button>
+        </form>
+      </td>
+    </tr>
+  }
+  </tbody>
+</table>
+
+<script>
+(function(){
+  const table = document.getElementById('wmUsersTable');
+  if(!table) return;
+  const tbody = table.querySelector('tbody');
+  const getText = (tr, idx) => (tr.children[idx]?.textContent || '').trim().toLowerCase();
+  const headers = table.querySelectorAll('th.wm-th-sortable');
+  headers.forEach((th, idx) => {
+    th.addEventListener('click', () => {
+      const asc = th.dataset.asc !== 'true';
+      headers.forEach(h => h.dataset.asc = '');
+      th.dataset.asc = asc ? 'true' : 'false';
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      rows.sort((a,b) => {
+        const av = getText(a, idx), bv = getText(b, idx);
+        if(av < bv) return asc ? -1 : 1;
+        if(av > bv) return asc ? 1 : -1;
+        return 0;
+      });
+      tbody.innerHTML = '';
+      rows.forEach(r => tbody.appendChild(r));
+    });
+  });
+})();
+</script>

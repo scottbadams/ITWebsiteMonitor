@@ -1,23 +1,28 @@
 @page
-@using Microsoft.AspNetCore.Identity
-@using Microsoft.EntityFrameworkCore
-@using WebsiteMonitor.Storage.Data
-@using WebsiteMonitor.Storage.Identity
-@inject SignInManager<ApplicationUser> SignInManager
-@inject WebsiteMonitorDbContext Db
+@model WebsiteMonitor.App.Pages.IndexModel
 
 @{
   ViewData["Title"] = "Home";
+  var schemeParam = (Request.Query["scheme"].ToString() ?? "").Trim();
+  var schemeQs = string.IsNullOrWhiteSpace(schemeParam) ? "" : "&scheme=" + Uri.EscapeDataString(schemeParam);
+
+  // Detect when the Home page is being framed cross-site by Zabbix.
+  // If so, propagate a flag (z=1) to nested iframes so they can adjust behavior
+  // (e.g., keep navigation inside the frame) without affecting normal Home-tab iframes.
+  var fetchDest = (Request.Headers["Sec-Fetch-Dest"].ToString() ?? "").Trim();
+  var fetchSite = (Request.Headers["Sec-Fetch-Site"].ToString() ?? "").Trim();
+  var isZabbixFrame =
+      string.Equals(fetchDest, "iframe", StringComparison.OrdinalIgnoreCase) &&
+      string.Equals(fetchSite, "cross-site", StringComparison.OrdinalIgnoreCase);
+  var zQs = isZabbixFrame ? "&z=1" : "";
+  var iframeQs = schemeQs + zQs;
 }
 
-@if (SignInManager.IsSignedIn(User))
+@if (Model.IsSignedIn)
 {
   <p class="wm-meta">Signed in as: <b>@User.Identity?.Name</b></p>
 
-  var instances = await Db.Instances.AsNoTracking()
-    .OrderBy(i => i.DisplayName)
-    .ThenBy(i => i.InstanceId)
-    .ToListAsync();
+  var instances = Model.Instances;
 
   if (instances.Count == 0)
   {
@@ -26,7 +31,20 @@
   else
   {
     <div class="wm-tabs" id="wm-home-tabs">
-      <div class="wm-tablist" role="tablist" aria-label="Instance Monitors">
+      <div class="wm-tablist" role="tablist" aria-label="Home Tabs">
+        <!-- Overview (always first) -->
+        <button
+          class="wm-tab"
+          type="button"
+          role="tab"
+          id="tab-overview"
+          aria-controls="panel-overview"
+          aria-selected="true"
+          tabindex="0"
+          data-target="panel-overview">
+          <span class="wm-btn">Overview</span>
+        </button>
+
         @for (var i = 0; i < instances.Count; i++)
         {
           var inst = instances[i];
@@ -39,12 +57,40 @@
             role="tab"
             id="@tabId"
             aria-controls="@panelId"
-            aria-selected="@(i == 0 ? "true" : "false")"
-            tabindex="@(i == 0 ? "0" : "-1")"
+            aria-selected="false"
+            tabindex="-1"
             data-target="@panelId">
             <span class="wm-btn">@label</span>
           </button>
         }
+      </div>
+
+      <!-- Overview panel -->
+      <div
+        class="wm-tabpanel"
+        id="panel-overview"
+        role="tabpanel"
+        aria-labelledby="tab-overview"
+        style="display:block;">
+        <div class="wm-overviewHeader">
+          <div class="wm-overviewTitle"><b>Overview</b></div>
+          <div class="wm-overviewSub">Last Check: <span id="wm-overview-lastcycle"></span></div>
+        </div>
+
+        <table class="wm-table wm-overviewTable">
+          <thead>
+            <tr>
+              <th style="text-align:left;">Name</th>
+              <th style="text-align:right;">Targets Enabled</th>
+              <th style="text-align:right;">Check Interval</th>
+              <th style="text-align:right;">Concurrency</th>
+              <th style="text-align:right;">Last Check</th>
+            </tr>
+          </thead>
+          <tbody id="wm-overview-body">
+            <tr class="wm-unknown"><td colspan="5">Loading…</td></tr>
+          </tbody>
+        </table>
       </div>
 
       @for (var i = 0; i < instances.Count; i++)
@@ -56,8 +102,8 @@
           id="@panelId"
           role="tabpanel"
           aria-labelledby="tab-@inst.InstanceId"
-          style="display:@(i == 0 ? "block" : "none")">
-          <iframe class="wm-iframe" src="/monitor/@inst.InstanceId?embed=1"></iframe>
+          style="display:none;">
+          <iframe class="wm-iframe" src="/monitor/@inst.InstanceId?embed=1@(iframeQs)"></iframe>
         </div>
       }
     </div>
@@ -72,17 +118,32 @@
 
         function activate(tab) {
           const targetId = tab.getAttribute('data-target');
+          if (!targetId) return;
+
           tabs.forEach(t => {
-            const on = (t === tab);
-            t.setAttribute('aria-selected', on ? 'true' : 'false');
-            t.tabIndex = on ? 0 : -1;
+            const active = t === tab;
+            t.setAttribute('aria-selected', active ? 'true' : 'false');
+            t.tabIndex = active ? 0 : -1;
           });
+
           panels.forEach(p => {
             p.style.display = (p.id === targetId) ? 'block' : 'none';
           });
+
+          tab.focus();
         }
 
         tabs.forEach(t => t.addEventListener('click', () => activate(t)));
+        // Deep-link: allow ?instanceId=<id> (e.g., from alert emails) to open the matching tab.
+        try {
+          const u = new URL(window.location.href);
+          const iid = (u.searchParams.get('instanceId') || u.searchParams.get('instance') || '').trim();
+          if (iid) {
+            const t = document.getElementById('tab-' + iid);
+            if (t) activate(t);
+          }
+        } catch (e) { }
+
 
         root.addEventListener('keydown', (e) => {
           const k = e.key;
@@ -96,6 +157,194 @@
           e.preventDefault();
           tabs[next].focus();
           activate(tabs[next]);
+        });
+      })();
+    </script>
+
+    <script>
+      (function () {
+        const tbody = document.getElementById('wm-overview-body');
+        const lastCycle = document.getElementById('wm-overview-lastcycle');
+        if (!tbody) return;
+
+        async function refreshOverview() {
+          try {
+            const u = new URL(window.location.href);
+            u.searchParams.set('handler', 'Overview');
+
+            const res = await fetch(u.toString(), { headers: { 'Accept': 'application/json' } });
+            if (!res.ok) return;
+
+            const data = await res.json();
+            if (lastCycle) lastCycle.textContent = (data.lastCycleLocal || '');
+
+            const rows = Array.isArray(data.rows) ? data.rows : [];
+            tbody.innerHTML = '';
+
+            if (rows.length === 0) {
+              const tr = document.createElement('tr');
+              tr.className = 'wm-unknown';
+              const td = document.createElement('td');
+              td.colSpan = 5;
+              td.textContent = 'No enabled instances.';
+              tr.appendChild(td);
+              tbody.appendChild(tr);
+              return;
+            }
+
+            for (const r of rows) {
+              const tr = document.createElement('tr');
+              tr.className = (r.rowClass || '');
+
+              // Name (click to switch to that instance tab)
+              const tdName = document.createElement('td');
+              tdName.style.textAlign = 'left';
+
+              const btn = document.createElement('button');
+              btn.type = 'button';
+              btn.className = 'wm-overviewNameBtn';
+              btn.textContent = (r.displayName || r.instanceId || '');
+              btn.title = (r.statusText || '');
+              btn.addEventListener('click', () => {
+                const tab = document.getElementById('tab-' + r.instanceId);
+                if (tab) tab.click();
+              });
+
+              tdName.appendChild(btn);
+
+              const tdTargets = document.createElement('td');
+              tdTargets.style.textAlign = 'right';
+              tdTargets.textContent = String(r.targetsEnabled ?? '');
+
+              const tdInterval = document.createElement('td');
+              tdInterval.style.textAlign = 'right';
+              tdInterval.textContent = (r.checkIntervalSeconds != null) ? (String(r.checkIntervalSeconds) + 's') : '';
+
+              const tdConc = document.createElement('td');
+              tdConc.style.textAlign = 'right';
+              tdConc.textContent = (r.concurrencyLimit != null) ? String(r.concurrencyLimit) : '';
+
+              const tdLast = document.createElement('td');
+              tdLast.style.textAlign = 'right';
+              tdLast.textContent = (r.lastCheckLocal || '');
+
+              tr.appendChild(tdName);
+              tr.appendChild(tdTargets);
+              tr.appendChild(tdInterval);
+              tr.appendChild(tdConc);
+              tr.appendChild(tdLast);
+
+              tbody.appendChild(tr);
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        refreshOverview();
+        setInterval(refreshOverview, 20000);
+      })();
+    </script>
+
+    <script>
+      (function () {
+        // When a per-instance iframe navigates into Configure (Setup) view, we want the
+        // Home header to behave like "Setup mode": hide the Home tabs bar, show only the
+        // instance display name in the header-left title area, and turn the header "Setup"
+        // button into a "Home" button that returns to monitoring for that instance.
+        const root = document.getElementById('wm-home-tabs');
+        if (!root) return;
+
+        const tabList = root.querySelector('.wm-tablist');
+        const titleEl = document.getElementById('wm-topbar-title-text');
+        const primaryBtn = document.getElementById('wm-topbar-primary-btn');
+        if (!primaryBtn) return;
+
+        const nestedIframeQs = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(iframeQs));
+
+        const originalTitle = titleEl ? (titleEl.textContent || '') : '';
+        const originalBtnText = (primaryBtn.textContent || '').trim();
+        const originalBtnHref = primaryBtn.getAttribute('href');
+
+        function getActiveInstanceId() {
+          const active = root.querySelector('[role="tab"][aria-selected="true"]');
+          if (!active) return '';
+          const id = (active.getAttribute('id') || '').trim();
+          if (!id || id === 'tab-overview') return '';
+          if (id.indexOf('tab-') !== 0) return '';
+          return id.substring('tab-'.length);
+        }
+
+        function enterConfigureContext(instanceId, displayName) {
+          if (tabList) tabList.style.display = 'none';
+          if (titleEl && displayName) titleEl.textContent = displayName;
+
+          primaryBtn.setAttribute('data-wm-iid', instanceId || '');
+          primaryBtn.textContent = 'Home';
+          // Use JS to return to monitoring without a full reload.
+          primaryBtn.setAttribute('href', '#');
+        }
+
+        function exitConfigureContext() {
+          if (tabList) tabList.style.display = '';
+          if (titleEl) titleEl.textContent = originalTitle;
+
+          primaryBtn.removeAttribute('data-wm-iid');
+          primaryBtn.textContent = originalBtnText || 'Setup';
+          if (originalBtnHref) primaryBtn.setAttribute('href', originalBtnHref);
+          else primaryBtn.removeAttribute('href');
+        }
+
+        function returnToMonitoring(instanceId) {
+          const iid = (instanceId || '').trim();
+          if (!iid) { exitConfigureContext(); return; }
+
+          // Restore the Home tabs header first.
+          exitConfigureContext();
+
+          // Activate the correct instance tab.
+          const tab = document.getElementById('tab-' + iid);
+          if (tab) tab.click();
+
+          // Ensure the iframe is showing the monitor page for this instance.
+          const panel = document.getElementById('panel-' + iid);
+          if (panel) {
+            const ifr = panel.querySelector('iframe.wm-iframe');
+            if (ifr) {
+              const desired = '/monitor/' + iid + '?embed=1' + (nestedIframeQs || '');
+              if (ifr.getAttribute('src') !== desired) {
+                ifr.setAttribute('src', desired);
+              }
+            }
+          }
+        }
+
+        // Turn the header button into a "return Home" action while in configure mode.
+        primaryBtn.addEventListener('click', function (e) {
+          const iid = primaryBtn.getAttribute('data-wm-iid');
+          if (!iid) return;
+          e.preventDefault();
+          returnToMonitoring(iid);
+        }, true);
+
+        // Listen for context messages from child iframes.
+        window.addEventListener('message', function (ev) {
+          const d = ev && ev.data;
+          if (!d || typeof d !== 'object') return;
+          if (d.type !== 'wm:context') return;
+
+          // Only react to messages from the currently active instance panel.
+          const activeIid = getActiveInstanceId();
+          const msgIid = (d.instanceId || '').trim();
+          if (!activeIid || !msgIid || activeIid !== msgIid) return;
+
+          const mode = (d.mode || '').toLowerCase();
+          if (mode === 'configure') {
+            enterConfigureContext(msgIid, (d.displayName || '').toString());
+          }
+          else if (mode === 'monitor' || mode === 'clear' || mode === 'home') {
+            exitConfigureContext();
+          }
         });
       })();
     </script>

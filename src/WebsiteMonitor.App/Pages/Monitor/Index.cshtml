@@ -52,6 +52,27 @@
               || string.Equals(embedParam, "true", StringComparison.OrdinalIgnoreCase)
               || string.Equals(embedParam, "yes", StringComparison.OrdinalIgnoreCase);
 
+    // Home propagates z=1 to nested iframes when ITWebsiteMonitor is framed in Zabbix.
+    // In that mode we avoid target=_blank so navigation stays inside the frame.
+    var zParam = (ViewContext?.HttpContext?.Request?.Query["z"].ToString() ?? "").Trim();
+    var isZabbixChild = string.Equals(zParam, "1", StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(zParam, "true", StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(zParam, "yes", StringComparison.OrdinalIgnoreCase);
+
+    var schemeParamRaw = (ViewContext?.HttpContext?.Request?.Query["scheme"].ToString() ?? "").Trim();
+    var schemeParam = (schemeParamRaw ?? "").Trim().ToLowerInvariant();
+    var schemeIsValid = schemeParam == "light" || schemeParam == "dark";
+
+    var configureHref = $"/setup/instances/{Model.InstanceId}";
+    if (isZabbixChild)
+    {
+        var qs = new System.Collections.Generic.List<string>();
+        qs.Add("embed=1");
+        qs.Add("z=1");
+        if (schemeIsValid) qs.Add("scheme=" + schemeParam);
+        configureHref += "?" + string.Join("&", qs);
+    }
+
     var tzLabel = GetStr(Model, "TimeZoneLabel", "TimeZoneId");
     if (string.IsNullOrWhiteSpace(tzLabel))
         tzLabel = System.TimeZoneInfo.Local.Id;
@@ -71,27 +92,78 @@
     ViewData["Title"] = titleText;
 }
 
+@if (isEmbed)
+{
+  <script>
+    (function () {
+      try {
+        if (window.parent && window.parent !== window.self) {
+          var msg = {
+            type: 'wm:context',
+            mode: 'monitor',
+            instanceId: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.InstanceId)),
+            displayName: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(titleText))
+          };
+          window.parent.postMessage(msg, window.location.origin);
+        }
+      } catch (e) { }
+    })();
+  </script>
+}
+
 @section PageActions {
-  <a class="wm-btn" href="/setup/instances/@Model.InstanceId" target="_blank" rel="noopener noreferrer">Configure</a>
+  @if (isZabbixChild)
+  {
+    <a class="wm-btn" href="@configureHref">Configure</a>
+  }
+  else
+  {
+    <a class="wm-btn" href="/setup/instances/@Model.InstanceId" target="_blank" rel="noopener noreferrer">Configure</a>
+  }
   @if (isEmbed)
   {
-    <form class="wm-actionform" method="post" asp-page-handler="Stop" asp-route-instanceId="@Model.InstanceId" asp-route-embed="1">
+    <form class="wm-actionform" method="post" asp-page-handler="Stop" asp-route-instanceId="@Model.InstanceId" asp-route-embed="1" asp-route-z="@(isZabbixChild ? "1" : null)" asp-route-scheme="@(schemeIsValid ? schemeParam : null)">
       <button class="wm-btn" type="submit">Stop</button>
     </form>
-    <form class="wm-actionform" method="post" asp-page-handler="Start" asp-route-instanceId="@Model.InstanceId" asp-route-embed="1">
+    <form class="wm-actionform" method="post" asp-page-handler="Start" asp-route-instanceId="@Model.InstanceId" asp-route-embed="1" asp-route-z="@(isZabbixChild ? "1" : null)" asp-route-scheme="@(schemeIsValid ? schemeParam : null)">
       <button class="wm-btn" type="submit">Start</button>
     </form>
   }
 }
 
+@section HeaderUnderLogo {
+  @if (!isEmbed)
+  {
+    <div>Last Check (@tzLabel): <strong>@lastCheckDisplay</strong></div>
+  }
+}
+
 
 <div class="wm-container">
-  <div class="wm-bar">
-    <div class="wm-meta">
-      <span class="wm-metaLabel">Last Check (@tzLabel):</span>
-      <span id="wm-lastcheck" class="wm-metaValue">@lastCheckDisplay</span>
+  @if (isEmbed)
+  {
+    <div class="wm-bar">
+      <div class="wm-meta">
+        <div style="display:flex; flex-direction:column; gap:2px;">
+          <div style="font-weight:700; font-size:1.15rem; line-height:1.2;">@Model.DisplayName</div>
+          <div>
+            <span class="wm-metaLabel">Last Check (@tzLabel):</span>
+            <span id="wm-lastcheck" class="wm-metaValue">@lastCheckDisplay</span>
+          </div>
+        </div>
+      </div>
+      <div class="wm-barActions">
+        @if (isZabbixChild)
+        {
+          <a class="wm-btn" href="@configureHref">Configure</a>
+        }
+        else
+        {
+          <a class="wm-btn" href="/setup/instances/@Model.InstanceId" target="_blank" rel="noopener noreferrer">Configure</a>
+        }
+      </div>
     </div>
-  </div>
+  }
 
   <style>
     .wm-container { padding: 10px 10px; }
@@ -101,6 +173,8 @@
     .wm-metaLabel { opacity: 0.85; }
     .wm-metaValue { font-weight: 600; }
 
+
+    .wm-barActions { display: flex; align-items: center; gap: 6px; }
 
     tr.wm-up { background-color: rgba(0, 180, 0, 0.15); }
     tr.wm-down { background-color: rgba(220, 0, 0, 0.14); }
@@ -170,13 +244,27 @@
       <td style="text-align:left;">
         <div class="wm-site1">
           <!-- Row 1: link to per-target snapshot -->
-          <a class="wm-siteLink" href="@snapHref" target="_blank" rel="noopener noreferrer">@url</a>
+          @if (isZabbixChild)
+          {
+            <a class="wm-siteLink" href="@snapHref">@url</a>
+          }
+          else
+          {
+            <a class="wm-siteLink" href="@snapHref" target="_blank" rel="noopener noreferrer">@url</a>
+          }
         </div>
         <div class="wm-site2">
           <!-- Row 2: link to live FinalUrl -->
           @if (!string.IsNullOrWhiteSpace(finalUrl))
           {
-            <a class="wm-finalLink" href="@finalUrl" target="_blank" rel="noopener noreferrer">@finalUrl</a>
+            if (isZabbixChild)
+            {
+              <span class="wm-finalLink wm-finalLink-disabled">@finalUrl</span>
+            }
+            else
+            {
+              <a class="wm-finalLink" href="@finalUrl" target="_blank" rel="noopener noreferrer">@finalUrl</a>
+            }
           }
         </div>
       </td>
@@ -197,6 +285,7 @@
 <script>
 (() => {
   const instanceId = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.InstanceId));
+  const isZabbixChild = @Html.Raw(isZabbixChild ? "true" : "false");
   const pollMs = 10000;
 
   // CHANGE THIS IF YOUR SNAPSHOT ROUTE IS DIFFERENT
@@ -406,23 +495,32 @@
       const a1 = document.createElement("a");
       a1.className = "wm-siteLink";
       a1.href = snapHref;
-      a1.target = "_blank";
-      a1.rel = "noopener noreferrer";
+      if (!isZabbixChild) {
+        a1.target = "_blank";
+        a1.rel = "noopener noreferrer";
+      }
       a1.textContent = urlText;
       div1.appendChild(a1);
 
       const div2 = document.createElement("div");
       div2.className = "wm-site2";
 
-      // Row 2: finalUrl link
+      // Row 2: finalUrl link (disabled in Zabbix iframe)
       if (finalUrl) {
-        const a2 = document.createElement("a");
-        a2.className = "wm-finalLink";
-        a2.href = finalUrl;
-        a2.target = "_blank";
-        a2.rel = "noopener noreferrer";
-        a2.textContent = finalUrl;
-        div2.appendChild(a2);
+        if (isZabbixChild) {
+          const s2 = document.createElement("span");
+          s2.className = "wm-finalLink wm-finalLink-disabled";
+          s2.textContent = finalUrl;
+          div2.appendChild(s2);
+        } else {
+          const a2 = document.createElement("a");
+          a2.className = "wm-finalLink";
+          a2.href = finalUrl;
+          a2.target = "_blank";
+          a2.rel = "noopener noreferrer";
+          a2.textContent = finalUrl;
+          div2.appendChild(a2);
+        }
       }
 
       tdSite.appendChild(div1);

@@ -1,0 +1,44 @@
+@page "/setup/roles"
+@model WebsiteMonitor.App.Pages.Setup.Roles.IndexModel
+@{
+  ViewData["Title"] = "Roles";
+}
+
+@section PageActions {
+  <a class="wm-btn" href="/setup">Back to Setup</a>
+}
+
+<h1>Roles</h1>
+
+@if (!string.IsNullOrWhiteSpace(Model.Error))
+{
+  <p class="wm-meta" style="color:#b00;">@Model.Error</p>
+}
+
+<form method="post" asp-page-handler="Create" style="margin:12px 0;">
+  <label for="Name" style="margin-right:8px;">New role name</label>
+  <input id="Name" type="text" name="Name" required style="width:260px; margin-right:8px;" />
+  <button type="submit" class="wm-btn wm-primary">Add</button>
+</form>
+
+<table class="wm-table">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th class="wm-cell-actions">Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+  @foreach (var r in Model.Roles)
+  {
+    <tr>
+      <td>@r</td>
+      <td class="wm-cell-actions">
+        <form method="post" asp-page-handler="Delete" asp-route-name="@r" style="display:inline">
+          <button type="submit" class="wm-btn wm-danger" onclick="return confirm('Delete role: @r ?');">Delete</button>
+        </form>
+      </td>
+    </tr>
+  }
+  </tbody>
+</table>

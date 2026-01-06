@@ -1,0 +1,126 @@
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.Extensions.DependencyInjection
+@using WebsiteMonitor.Storage.Data
+@{
+    var appName = "ITWebsiteMonitor";
+    var pageTitle = (ViewData["Title"] as string) ?? "";
+    var fullTitle = string.IsNullOrWhiteSpace(pageTitle) ? appName : $"{appName} - {pageTitle}";
+
+    // embed mode (used by Home-page iframes/tabs) hides the header chrome
+    var embedParam = Context?.Request?.Query["embed"].ToString();
+    var isEmbed =
+        string.Equals(embedParam, "1", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(embedParam, "true", StringComparison.OrdinalIgnoreCase);
+
+    // Prevent "section defined but not rendered" errors when a page is embedded.
+    if (isEmbed)
+    {
+        // These are optional sections, but defining them on a page still requires the layout
+        // to either render or explicitly ignore them.
+        IgnoreSection("HeaderRight");
+        IgnoreSection("PageActions");
+        IgnoreSection("PageActionsPre");
+    }
+
+    // Default logo (static). If SystemSettings defines LogoPath, use it.
+    // NOTE: Use an absolute app-root path so it works even if MVC tag helpers are disabled.
+    var logoSrc = "/images/itgreatfalls-logo.png";
+    try
+    {
+        var db = Context?.RequestServices.GetService<WebsiteMonitorDbContext>();
+        if (db != null)
+        {
+            var ss = db.SystemSettings.AsNoTracking().FirstOrDefault(s => s.Id == 1);
+            if (ss != null && !string.IsNullOrWhiteSpace(ss.LogoPath))
+            {
+                logoSrc = ss.LogoPath.StartsWith("/") ? ss.LogoPath : ("/" + ss.LogoPath);
+            }
+        }
+    }
+    catch { }
+
+    // Theme preference (claims transformation adds wm:theme=dark/light)
+    var themePref = "light";
+    try
+    {
+        var t = User?.FindFirst("wm:theme")?.Value;
+        if (!string.IsNullOrWhiteSpace(t)) themePref = t;
+    }
+    catch { }
+
+    var themeClass = string.Equals(themePref, "dark", StringComparison.OrdinalIgnoreCase) ? "theme-dark" : "theme-light";
+
+    // Close button: show unless explicitly hidden, and never in embed mode
+    var showClose = !(ViewData["HideClose"] as bool? ?? false);
+}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@fullTitle</title>
+
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    @RenderSection("Styles", required: false)
+</head>
+<body class="@themeClass">
+
+@* When in embed mode we hide the header chrome. If a page defines header sections, we must
+   explicitly ignore them, otherwise Razor will throw at runtime. *@
+@if (isEmbed)
+{
+    if (IsSectionDefined("HeaderRight")) { IgnoreSection("HeaderRight"); }
+    if (IsSectionDefined("PageActions")) { IgnoreSection("PageActions"); }
+    if (IsSectionDefined("PageActionsPre")) { IgnoreSection("PageActionsPre"); }
+    if (IsSectionDefined("HeaderUnderLogo")) { IgnoreSection("HeaderUnderLogo"); }
+}
+else
+{
+    <div class="wm-topbar" style="padding:10px;">
+        <div class="wm-topbar-title">
+            <img class="wm-logo" src="@logoSrc" alt="Logo" />
+            <span>@fullTitle</span>
+        </div>
+
+        <div class="wm-topbar-actions">
+            @RenderSection("PageActionsPre", required: false)
+            @{
+                var isHomePage =
+                    string.Equals(Context?.Request?.Path.Value, "/", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(pageTitle, "Home", StringComparison.OrdinalIgnoreCase);
+            }
+            @if (isHomePage)
+            {
+                <a class="wm-btn" asp-page="/Setup/Index" target="_blank" rel="noopener noreferrer">Setup</a>
+            }
+            else
+            {
+                <a class="wm-btn" href="/">Home</a>
+            }
+            @RenderSection("PageActions", required: false)
+            <a class="wm-btn" href="/Account/Logout">Log Out</a>
+
+            @if (showClose)
+            {
+                <button class="wm-btn" type="button" onclick="window.close()">Close</button>
+            }
+
+            @RenderSection("HeaderRight", required: false)
+        </div>
+
+        <div class="wm-topbar-under">
+            @RenderSection("HeaderUnderLogo", required: false)
+        </div>
+    </div>
+}
+
+<main class="container">
+    @RenderBody()
+</main>
+
+#<script src="~/js/site.js" asp-append-version="true"></script>
+@RenderSection("Scripts", required: false)
+
+</body>
+</html>

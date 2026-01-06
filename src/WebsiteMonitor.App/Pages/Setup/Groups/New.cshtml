@@ -1,0 +1,31 @@
+@page "/setup/groups/new"
+@model WebsiteMonitor.App.Pages.Setup.Groups.NewModel
+@{
+  ViewData["Title"] = "New Group";
+}
+
+@section PageActions {
+  <a class="wm-btn" href="/setup/groups">Back</a>
+}
+
+<h1>Create group</h1>
+
+@if (!string.IsNullOrWhiteSpace(Model.Error))
+{
+  <p class="wm-meta" style="color:#b00;">@Model.Error</p>
+}
+
+<form method="post">
+  <table class="wm-formtable">
+    <tr>
+      <td style="padding-right:10px; white-space:nowrap;"><label for="Name">Name</label></td>
+      <td><input id="Name" type="text" name="Name" value="@Model.Name" required style="width:420px;" /></td>
+    </tr>
+    <tr>
+      <td></td>
+      <td style="padding-top:10px;">
+        <button class="wm-btn wm-primary" type="submit">Create</button>
+      </td>
+    </tr>
+  </table>
+</form>

@@ -14,4 +14,8 @@ public sealed class AlertingOptions
 
     public int DailyHourLocal { get; set; } = 10;
     public int DailyMinuteLocal { get; set; } = 0;
+
+    // Absolute base URL used in alert emails for logo and "Open Dashboard" link.
+    // Example: https://monitor.example.com  (no trailing slash required)
+    public string? PublicBaseUrl { get; set; } = null;
 }

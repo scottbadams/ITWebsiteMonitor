@@ -3,30 +3,68 @@
 @attribute [Authorize(Roles = "Admin")]
 @model WebsiteMonitor.App.Pages.Setup.Targets.NewModel
 
-<h1>Add Target (Instance: @Model.InstanceId)</h1>
+@{
+  ViewData["Title"] = $"New Target - {Model.InstanceId}";
 
-@if (Model.Error != null)
-{
-    <p style="color:red">@Model.Error</p>
+  var q = ViewContext?.HttpContext?.Request?.Query;
+  var embedVal = q?["embed"].ToString();
+  var isEmbed =
+    string.Equals(embedVal, "1", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(embedVal, "true", StringComparison.OrdinalIgnoreCase);
+
+
+  var zVal = (q?["z"].ToString() ?? "").Trim();
+  var isZabbixChild =
+    string.Equals(zVal, "1", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(zVal, "true", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(zVal, "yes", StringComparison.OrdinalIgnoreCase);
+
+  var schemeRaw = (q?["scheme"].ToString() ?? "").Trim();
+  var schemeParam = (schemeRaw ?? "").Trim().ToLowerInvariant();
+  var schemeIsValid = schemeParam == "light" || schemeParam == "dark";
+
+  var qs = new System.Collections.Generic.List<string>();
+  if (isEmbed) qs.Add("embed=1");
+  if (isZabbixChild) qs.Add("z=1");
+  if (schemeIsValid) qs.Add("scheme=" + schemeParam);
+  var embedSuffix = qs.Count > 0 ? ("?" + string.Join("&", qs)) : "";
 }
 
-<form method="post">
-    @Html.AntiForgeryToken()
 
-    <label>URL</label><br />
-    <input asp-for="TargetUrl" style="width:600px" /><br /><br />
+@if (!isEmbed)
+{
+  <div class="wm-actions" style="margin-bottom:10px;">
+    <a class="wm-btn" href="/setup">Back to Setup</a>
+    <a class="wm-btn" href="/setup/instances/@Model.InstanceId#targets">Back to Instance</a>
+  </div>
+}
 
-    <label>Enabled</label>
-    <input asp-for="Enabled" type="checkbox" />
-    <br /><br />
+<form method="post" asp-route-instanceId="@Model.InstanceId" asp-route-embed="@(isEmbed ? "1" : null)" asp-route-z="@(isZabbixChild ? "1" : null)" asp-route-scheme="@(schemeIsValid ? schemeParam : null)">
+  <div style="display:grid; gap:10px; max-width: 900px;">
+    <div>
+      <label><strong>Target URL</strong></label><br />
+      <input asp-for="TargetUrl" style="width:100%; max-width: 900px;" />
+    </div>
 
-    <label>Expected HTTP Status Min</label><br />
-    <input asp-for="HttpMin" type="number" /><br /><br />
+    <div>
+      <label><strong>Enabled</strong></label><br />
+      <input asp-for="Enabled" type="checkbox" />
+    </div>
 
-    <label>Expected HTTP Status Max</label><br />
-    <input asp-for="HttpMax" type="number" /><br /><br />
+    <div style="display:flex; gap:14px; flex-wrap:wrap;">
+      <div>
+        <label><strong>Expected HTTP Status Min</strong></label><br />
+        <input asp-for="HttpMin" type="number" style="width:140px;" />
+      </div>
+      <div>
+        <label><strong>Expected HTTP Status Max</strong></label><br />
+        <input asp-for="HttpMax" type="number" style="width:140px;" />
+      </div>
+    </div>
 
-    <button type="submit">Add</button>
+    <div class="wm-actions" style="margin-top:6px;">
+      <button class="wm-btn" type="submit">Add</button>
+      <a class="wm-btn" href="/setup/instances/@Model.InstanceId/targets@embedSuffix">Cancel</a>
+    </div>
+  </div>
 </form>
-
-<p><a href="/setup/instances/@Model.InstanceId/targets">Back</a></p>

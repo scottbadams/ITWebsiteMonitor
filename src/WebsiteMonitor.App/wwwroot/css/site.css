@@ -5,6 +5,22 @@
   margin: 0;
 }
 
+
+/* Base theme colors (explicit, not OS-driven) */
+body.theme-light{ background:#fff; color:#111; }
+body.theme-dark{ background:#0f0f0f; color:#f2f2f2; }
+
+
+/* Global content padding (10px all sides) */
+main.container{
+  padding: 10px;
+  box-sizing: border-box;
+}
+.wm-page{
+  padding: 10px;
+  box-sizing: border-box;
+}
+
 h1 { font-size: 16px; font-weight: 600; margin: 4px 0; }
 h2 { font-size: 14px; font-weight: 600; margin: 4px 0; }
 
@@ -18,6 +34,51 @@ td:last-child { white-space: normal; }
 /* === WM GLOBAL HEADER + BUTTONS === */
 
 .wm-topbar{
+  display:grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  row-gap: 6px;
+  align-items:center;
+  margin: 0 0 10px 0;
+}
+
+.wm-topbar-title{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  font-size:18px;
+  font-weight:600;
+  margin:0;
+  grid-column: 1;
+  grid-row: 1;
+}
+.wm-logo{
+  width:75px;
+  height:75px;
+  object-fit:contain;
+  flex:0 0 auto;
+}
+
+.wm-topbar-actions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:nowrap;
+  justify-content:flex-end;
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.wm-topbar-under{
+  grid-column: 1 / -1;
+  grid-row: 2;
+  font-size:12px;
+  opacity:0.9;
+}
+.wm-topbar-under:empty{ display:none; }
+
+.wm-toprow{
   display:flex;
   align-items:center;
   justify-content:space-between;
@@ -25,29 +86,25 @@ td:last-child { white-space: normal; }
   margin: 0 0 10px 0;
 }
 
-.wm-topbar-title{
-  font-size:18px;
-  font-weight:600;
-  margin:0;
-}
-
-.wm-topbar-actions{
+.wm-toprow-actions{
   display:flex;
   align-items:center;
   gap:8px;
   flex-wrap:wrap;
+  justify-content:flex-end;
 }
 
 .wm-actionform{ margin:0; display:inline; }
 
 /* Button style copied from Monitor page */
-.wm-btn{
+.wm-btn,
+.btn{
   display:inline-flex;
   align-items:center;
   justify-content:center;
 
-  padding:7px 14px;
-  border-radius:9px;
+  padding: 3px 6px;
+  border-radius: 999px;
 
   background: linear-gradient(to bottom, #f7f7f7, #d6d6d6);
   border: 1px solid #6f6f6f;
@@ -61,14 +118,15 @@ td:last-child { white-space: normal; }
     0 2px 6px rgba(0,0,0,0.18);
 
   text-decoration:none;
-  font-size:12px;
+  font-size: 9px;
   line-height:1.2;
   user-select:none;
 
-  transition: transform 90ms ease, box-shadow 90ms ease, background 120ms ease, border-color 120ms ease, color 120ms ease;
-}
-.wm-btn:visited{ color:#111 !important; }
-.wm-btn:hover{
+  transition: transform 90ms ease, box-shadow 90ms ease, background 120ms ease, border-color 120ms ease, color 120ms ease;}
+.wm-btn:visited,
+.btn:visited{ color:#111 !important; }
+.wm-btn:hover,
+.btn:hover{
   background: linear-gradient(to bottom, #ffffff, #cfcfcf);
   border-color: #5f5f5f;
   box-shadow:
@@ -77,32 +135,69 @@ td:last-child { white-space: normal; }
     0 2px 10px rgba(0,0,0,0.22);
   transform: translateY(-1px);
 }
-.wm-btn:active{
+.wm-btn:active,
+.btn:active{
   transform: translateY(0);
   background: linear-gradient(to bottom, #dcdcdc, #f0f0f0);
   box-shadow:
     0 1px 0 rgba(0,0,0,0.15) inset,
     0 1px 1px rgba(0,0,0,0.10);
 }
-.wm-btn:focus{ outline: 2px solid rgba(0,0,0,0.25); outline-offset: 2px; }
+.wm-btn:focus,
+.btn:focus{ outline: 2px solid rgba(0,0,0,0.25); outline-offset: 2px; }
 
+/* Smaller buttons (used throughout Setup/Monitor UI) */
+.wm-btn-sm,
+.btn-sm{
+  padding: 3px 6px;
+  font-size: 9px;
+  border-radius: 999px;
+}
+/* Optional variants (safe to use even if not present everywhere) */
+.wm-btn-secondary,
+.btn-secondary{ background: linear-gradient(to bottom, #f7f7f7, #d9d9d9); }
+.wm-btn-danger,
+.btn-danger{ background: linear-gradient(to bottom, #ffb4b4, #ff6b6b); border-color: #ff4b4b; }
+
+/* Dark theme override (driven by body.theme-dark, not OS preference) */
+.theme-dark .wm-btn,
+.theme-dark .btn{
+  background: linear-gradient(to bottom, #343434, #1f1f1f);
+  border-color: #4e4e4e;
+  color: #f2f2f2 !important;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.12) inset,
+    0 0 0 1px rgba(255,255,255,0.06) inset,
+    0 1px 1px rgba(0,0,0,0.55),
+    0 2px 8px rgba(0,0,0,0.55);
+}
+.theme-dark .wm-btn:visited,
+.theme-dark .btn:visited{ color:#f2f2f2 !important; }
+.theme-dark .wm-btn:hover,
+.theme-dark .btn:hover{
+  background: linear-gradient(to bottom, #3b3b3b, #1b1b1b);
+  border-color: #6a6a6a;
+}
+.theme-dark .wm-btn:focus,
+.theme-dark .btn:focus{ outline: 2px solid rgba(255,255,255,0.25); }
+
+/* Fallback: if theme class isn't set, honor OS preference */
 @media (prefers-color-scheme: dark){
-  .wm-btn{
+  body:not(.theme-light) .wm-btn,
+  body:not(.theme-light) .btn{
     background: linear-gradient(to bottom, #343434, #1f1f1f);
     border-color: #4e4e4e;
     color: #f2f2f2 !important;
-    box-shadow:
-      0 1px 0 rgba(255,255,255,0.12) inset,
-      0 0 0 1px rgba(255,255,255,0.06) inset,
-      0 1px 1px rgba(0,0,0,0.55),
-      0 2px 8px rgba(0,0,0,0.55);
   }
-  .wm-btn:visited{ color:#f2f2f2 !important; }
-  .wm-btn:hover{
+  body:not(.theme-light) .wm-btn:visited,
+  body:not(.theme-light) .btn:visited{ color:#f2f2f2 !important; }
+  body:not(.theme-light) .wm-btn:hover,
+  body:not(.theme-light) .btn:hover{
     background: linear-gradient(to bottom, #3b3b3b, #1b1b1b);
     border-color: #6a6a6a;
   }
-  .wm-btn:focus{ outline: 2px solid rgba(255,255,255,0.25); }
+  body:not(.theme-light) .wm-btn:focus,
+  body:not(.theme-light) .btn:focus{ outline: 2px solid rgba(255,255,255,0.25); }
 }
 
 /* Home tab layout */
@@ -136,6 +231,16 @@ td:last-child { white-space: normal; }
   transform: translateY(-1px);
 }
 
+.wm-btn[aria-current="page"],
+.wm-btn.wm-btn-active{
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.95) inset,
+    0 0 0 1px rgba(255,255,255,0.30) inset,
+    0 1px 1px rgba(0,0,0,0.12),
+    0 10px 30px rgba(0,0,0,0.12);
+  transform: translateY(-1px);
+}
+
 .wm-tabpanel{
   border: 1px solid rgba(0,0,0,0.20);
   border-radius: 10px;
@@ -150,6 +255,16 @@ td:last-child { white-space: normal; }
   }
 }
 
+
+/* Theme-driven tabpanel colors (override OS preference when theme class is set) */
+.theme-light .wm-tabpanel{
+  border-color: rgba(0,0,0,0.20);
+  background: rgba(255,255,255,0.60);
+}
+.theme-dark .wm-tabpanel{
+  border-color: rgba(255,255,255,0.18);
+  background: rgba(0,0,0,0.25);
+}
 .wm-iframe{
   width:100%;
   height: 75vh;
@@ -158,6 +273,26 @@ td:last-child { white-space: normal; }
 }
 
 
+/* === Setup Instance subtabs (Configure page) === */
+.wm-subtabs{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  margin-top: 8px;
+}
+
+.wm-subtabs .wm-tablist{
+  flex-wrap: wrap;
+}
+
+.wm-subtabs .wm-tabpanel{
+  padding: 10px;
+}
+
+.wm-subtabs .wm-subtabpanel[hidden]{
+  display:none !important;
+}
+
 /* === Setup table helpers === */
 .wm-table{ width:100%; border-collapse:collapse; }
 .wm-table th, .wm-table td{ border-bottom: 1px solid rgba(0,0,0,0.12); }
@@ -165,35 +300,77 @@ td:last-child { white-space: normal; }
   .wm-table th, .wm-table td{ border-bottom-color: rgba(255,255,255,0.14); }
 }
 
+
+/* Theme-driven table borders (override OS preference when theme class is set) */
+.theme-light .wm-table th, .theme-light .wm-table td{ border-bottom-color: rgba(0,0,0,0.12); }
+.theme-dark  .wm-table th, .theme-dark  .wm-table td{ border-bottom-color: rgba(255,255,255,0.14); }
 .wm-sort{ font-size:10px; opacity:0.65; margin-left:4px; }
 .wm-th-sortable{ cursor:pointer; user-select:none; }
 
 .wm-row-disabled{ opacity:0.60; }
 
 .wm-cell-actions{ white-space:nowrap; }
-.wm-cell-actions .wm-btn{ padding:5px 10px; border-radius:8px; font-size:11px; }
+.wm-cell-actions .wm-btn{ padding:3px 6px; border-radius:999px; font-size:9px; }
 
-/* === Shared layout helpers (used by snapshots + pages) === */
-.wm-page { padding: 15px; }
 
-/* Match monitor row state colors across pages that use .wm-up/.wm-down/... */
-tr.wm-up { background-color: rgba(0, 180, 0, 0.15); }
-tr.wm-down { background-color: rgba(220, 0, 0, 0.14); }
-tr.wm-unknown { background-color: rgba(128, 128, 128, 0.14); }
-tr.wm-degraded { background-color: rgba(255, 215, 0, 0.14); }
-tr.wm-paused { background-color: rgba(255, 215, 0, 0.28); }
+/* === Embed scheme overrides ===
+   Use ?scheme=light or ?scheme=dark to force appearance (useful for cross-site iframe embeds). */
+body.wm-force-light{
+  color-scheme: light;
+  background: #fff;
+  color: #111;
+}
 
-/* Site cell helpers (monitor + snapshots) */
-.wm-site1 { font-size: 1.02em; }
-.wm-site2 { opacity: 0.75; font-size: 0.9em; margin-top: 2px; }
-.wm-since2 { opacity: 0.85; font-size: 0.9em; }
+/* Some components use OS dark-mode media queries; force them back to light when wm-force-light is set. */
+body.wm-force-light .wm-tabpanel{
+  border-color: rgba(0,0,0,0.20) !important;
+  background: rgba(255,255,255,0.60) !important;
+}
+body.wm-force-light .wm-table th,
+body.wm-force-light .wm-table td{
+  border-bottom-color: rgba(0,0,0,0.12) !important;
+}
 
-.wm-siteLink, .wm-finalLink { color: inherit; text-decoration: none; }
-.wm-siteLink:hover, .wm-finalLink:hover { text-decoration: underline; cursor: pointer; }
+body.wm-force-dark{
+  color-scheme: dark;
+  background: #0f0f0f;
+  color: #f2f2f2;
+}
 
-/* Setup table column alignment */
-.wm-col-enabled { width: 92px; text-align: center; }
-.wm-col-actions { width: 280px; }
-.wm-table th.wm-col-enabled, .wm-table td.wm-col-enabled { text-align: center; }
-.wm-table th.wm-col-actions { text-align: left; }
-.wm-cell-actions { vertical-align: top; white-space: nowrap; }
+body.wm-force-dark .wm-tabpanel{
+  border-color: rgba(255,255,255,0.18) !important;
+  background: rgba(0,0,0,0.25) !important;
+}
+body.wm-force-dark .wm-table th,
+body.wm-force-dark .wm-table td{
+  border-bottom-color: rgba(255,255,255,0.14) !important;
+}
+
+
+
+/* ------------------------------------------------------------
+   Overview tab (Home page) - instance summary table + row colors
+   ------------------------------------------------------------ */
+
+.wm-overviewHeader{ margin: 6px 0 12px; }
+.wm-overviewTitle{ font-size: 1.15em; font-weight: 700; margin-bottom: 2px; }
+.wm-overviewSub{ opacity: 0.85; font-size: 0.95em; }
+
+.wm-overviewTable th,
+.wm-overviewTable td{ padding: 8px 10px; }
+
+.wm-overviewNameBtn{
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.wm-overviewTable tr.wm-up{ background-color: rgba(0, 180, 0, 0.15); }
+.wm-overviewTable tr.wm-down{ background-color: rgba(220, 0, 0, 0.14); }
+.wm-overviewTable tr.wm-unknown{ background-color: rgba(128, 128, 128, 0.14); }
+.wm-overviewTable tr.wm-degraded{ background-color: rgba(255, 215, 0, 0.14); }
+.wm-overviewTable tr.wm-paused{ background-color: rgba(255, 215, 0, 0.28); }
